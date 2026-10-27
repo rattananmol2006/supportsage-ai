@@ -52,6 +52,7 @@ export const navLinks: NavLink[] = [
   { label: "Pipeline", href: "#pipeline" },
   { label: "Metrics", href: "#metrics" },
   { label: "Technology", href: "#technology" },
+  { label: "Dashboard", href: "/dashboard" },
 ];
 
 export const capabilities: Capability[] = [

@@ -1,148 +1,278 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
-import type { ChatMode } from "@/lib/chat-modes";
+import { AgentRequestError, runAgent } from "@/lib/agent";
+import {
+  appendMessage,
+  createConversation,
+  findConversation,
+  getSettings,
+  listDoctors,
+  updateConversation,
+} from "@/lib/db";
+import {
+  buildConversationSummary,
+  extractKeyInfo,
+  mergeKeyInfo,
+  titleFrom,
+} from "@/lib/insights";
+import { retrieveKnowledge, toSourceRefs } from "@/lib/rag";
+import { assessUrgency } from "@/lib/triage";
+import type {
+  ChatMode,
+  ChatResponse,
+  EmergencyContact,
+  SourceRef,
+  StoredMessage,
+} from "@/lib/types";
 
-type ChatMessage = {
-  role: "user" | "assistant";
-  content: string;
+const MAX_MESSAGE_LENGTH = 4000;
+
+type ChatBody = {
+  mode?: unknown;
+  message?: unknown;
+  conversationId?: unknown;
 };
 
-const MAX_MESSAGES = 16;
-const MAX_CONTENT_LENGTH = 4000;
+function json(data: unknown, init?: ResponseInit) {
+  const response = NextResponse.json(data, init);
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+}
 
-const systemPrompts: Record<ChatMode, string> = {
-  doctor:
-    "You are Sage, SupportSage AI's clinical support copilot in Doctor mode. Help clinicians, clinic staff, and patients with clear, practical healthcare support: explain clinical information in plain language, summarize symptoms, draft patient-friendly follow-up instructions, and help navigate care workflows. Do not provide a definitive diagnosis, prescribe medication, or claim to replace a licensed clinician. Recommend clinician review for clinical decisions. If the user describes an emergency such as chest pain, difficulty breathing, stroke signs, severe bleeding, or suicidal ideation, tell them to contact local emergency services immediately. Never invent patient data; ask for missing context. Use plain text only: short paragraphs and hyphen bullets. No markdown headings, bold markers, or tables. Keep responses concise, under about 220 words unless the user asks for more.",
-  business:
-    "You are Sage, SupportSage AI's customer support operations copilot in Business Owner mode. Help owners and support leads draft customer replies, handle refunds and escalations, summarize support metrics, design support policies, improve response quality, and decide when to involve a human. Be practical, commercially aware, concise, and structured. SupportSage AI's product principles are unified chat and voice, direct action APIs, contextual escalation, privacy and RBAC, a complete audit trail, and owner analytics; reflect them accurately when relevant. Never fabricate order numbers, customer details, or metrics; ask for missing facts and flag approval steps for refunds or policy exceptions. Avoid bracketed placeholder tokens in drafts; use a generic sign-off such as \"SupportSage Support\" when a name is unavailable. Use plain text only: short paragraphs and hyphen bullets. No markdown headings, bold markers, or tables. Keep responses concise, under about 220 words unless the user asks for more.",
-};
+function uniqueSources(sources: SourceRef[]) {
+  const seen = new Set<string>();
+  return sources.filter((source) => {
+    if (seen.has(source.id)) return false;
+    seen.add(source.id);
+    return true;
+  });
+}
 
-function parseMessages(value: unknown): ChatMessage[] | null {
-  if (!Array.isArray(value) || value.length === 0) return null;
-
-  const messages: ChatMessage[] = [];
-
-  for (const item of value) {
-    if (!item || typeof item !== "object") return null;
-
-    const { role, content } = item as Record<string, unknown>;
-    if (role !== "user" && role !== "assistant") return null;
-    if (typeof content !== "string") return null;
-
-    const trimmed = content.trim();
-    if (!trimmed || trimmed.length > MAX_CONTENT_LENGTH) return null;
-
-    messages.push({ role, content: trimmed });
-  }
-
-  if (!messages.some((message) => message.role === "user")) return null;
-
-  return messages.slice(-MAX_MESSAGES);
+function emergencyContactsFor(mode: ChatMode): EmergencyContact[] {
+  if (mode === "business") return [];
+  const settings = getSettings();
+  return [
+    {
+      label: "Emergency services",
+      value: "112 (India) · 911 (US)",
+      href: "tel:112",
+    },
+    {
+      label: settings.clinicName,
+      value: settings.clinicPhone,
+      href: `tel:${settings.clinicPhone.replace(/[^\d+]/g, "")}`,
+    },
+  ];
 }
 
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => null)) as {
-    mode?: unknown;
-    messages?: unknown;
-  } | null;
-
+  const body = (await request.json().catch(() => null)) as ChatBody | null;
   const mode = body?.mode;
+  const rawMessage = body?.message;
+
   if (mode !== "doctor" && mode !== "business") {
-    return NextResponse.json(
-      { error: "Choose Doctor or Business Owner mode." },
+    return json({ error: "Choose Doctor or Business Owner mode." }, { status: 400 });
+  }
+
+  if (typeof rawMessage !== "string") {
+    return json({ error: "Send a message to start chatting." }, { status: 400 });
+  }
+
+  const message = rawMessage.trim();
+  if (!message || message.length > MAX_MESSAGE_LENGTH) {
+    return json(
+      {
+        error: `Messages must be between 1 and ${MAX_MESSAGE_LENGTH} characters.`,
+      },
       { status: 400 },
     );
   }
 
-  const messages = parseMessages(body?.messages);
-  if (!messages) {
-    return NextResponse.json(
-      { error: "Send a valid message to start chatting." },
+  const requestedConversationId =
+    typeof body?.conversationId === "string"
+      ? body.conversationId.trim()
+      : undefined;
+
+  let conversation = requestedConversationId
+    ? findConversation(requestedConversationId)
+    : undefined;
+
+  if (conversation && conversation.mode !== mode) {
+    return json(
+      { error: "That conversation belongs to a different mode." },
       { status: 400 },
     );
   }
 
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
-    console.error("[chat] GROQ_API_KEY is not configured");
-    return NextResponse.json(
-      { error: "Chat is not configured yet. Add GROQ_API_KEY and try again." },
-      { status: 500 },
+  if (!conversation) {
+    conversation = createConversation(
+      mode,
+      titleFrom(message, assessUrgency(message, mode).level),
     );
   }
+
+  const conversationId = conversation.id;
+  const doctors = listDoctors();
+  const triage = assessUrgency(message, mode);
+  const extracted = extractKeyInfo(message, doctors, mode);
+  const now = new Date().toISOString();
+
+  appendMessage(conversationId, {
+    id: `msg-${randomUUID()}`,
+    role: "user",
+    content: message,
+    createdAt: now,
+    urgent: triage.level !== null,
+    urgencyLevel: triage.level,
+  });
+
+  const current = findConversation(conversationId);
+  if (!current) {
+    return json({ error: "Could not load the conversation." }, { status: 500 });
+  }
+
+  const preKeyInfo = mergeKeyInfo(current.keyInfo, extracted);
+  updateConversation(conversationId, {
+    keyInfo: preKeyInfo,
+    urgent: current.urgent || triage.level !== null,
+  });
+
+  const prepared = findConversation(conversationId);
+  if (!prepared) {
+    return json({ error: "Could not load the conversation." }, { status: 500 });
+  }
+
+  const userMessages = prepared.messages.filter(
+    (item) => item.role === "user",
+  );
+  const retrievalQuery = userMessages
+    .slice(-2)
+    .map((item) => item.content)
+    .join("\n");
+
+  const ragChunks = retrieveKnowledge(retrievalQuery, mode, {
+    urgent: triage.level !== null,
+    limit: 5,
+  });
+  const ragSources = toSourceRefs(ragChunks);
 
   try {
-    const response = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
-          messages: [
-            { role: "system", content: systemPrompts[mode] },
-            ...messages,
-          ],
-          temperature: 0.6,
-          max_completion_tokens: 900,
-        }),
-        signal: AbortSignal.timeout(30_000),
-        cache: "no-store",
-      },
-    );
+    const result = await runAgent({
+      mode,
+      conversation: prepared,
+      message,
+      triage,
+      ragChunks,
+    });
 
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      console.error(
-        `[chat] Groq request failed (${response.status}): ${detail.slice(0, 300)}`,
-      );
-
-      if (response.status === 429) {
-        return NextResponse.json(
+    const doctorSources: SourceRef[] = result.doctors.map((doctor) => ({
+      id: `doctor-${doctor.id}`,
+      title: `${doctor.name} — ${doctor.specialty}`,
+      type: "doctor",
+    }));
+    const orderSource: SourceRef[] = result.order
+      ? [
           {
-            error:
-              "The assistant is handling a lot of requests right now. Please wait a moment and try again.",
+            id: `order-${result.order.id}`,
+            title: `Order #${result.order.id} — ${result.order.customer}`,
+            type: "order",
           },
-          { status: 429 },
-        );
-      }
+        ]
+      : [];
+    const sources = uniqueSources([
+      ...ragSources,
+      ...doctorSources,
+      ...orderSource,
+    ]);
+    const contacts = emergencyContactsFor(mode);
 
-      return NextResponse.json(
-        {
-          error:
-            "The assistant couldn't respond just now. Please try again in a moment.",
-        },
-        { status: 502 },
-      );
-    }
-
-    const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
+    const assistantMessage: StoredMessage = {
+      id: `msg-${randomUUID()}`,
+      role: "assistant",
+      content: result.reply,
+      createdAt: new Date().toISOString(),
+      sources,
+      tools: result.tools,
+      doctors: result.doctors.length > 0 ? result.doctors : undefined,
+      appointment: result.appointment,
+      escalation: result.escalation,
+      order: result.order,
+      emergencyContacts: contacts.length > 0 ? contacts : undefined,
+      notificationStatus: result.notificationStatus,
+      urgent: triage.level !== null,
+      urgencyLevel: triage.level,
     };
-    const reply = data.choices?.[0]?.message?.content?.trim();
 
-    if (!reply) {
-      console.error("[chat] Groq returned an empty response");
-      return NextResponse.json(
-        {
-          error: "The assistant returned an empty response. Please try again.",
-        },
-        { status: 502 },
-      );
+    appendMessage(conversationId, assistantMessage);
+
+    const finalKeyInfo = mergeKeyInfo(preKeyInfo, result.keyInfoPatch);
+    const title =
+      userMessages.length === 1
+        ? titleFrom(message, triage.level)
+        : prepared.title;
+
+    const withAssistant = findConversation(conversationId);
+    if (!withAssistant) {
+      return json({ error: "Could not save the conversation." }, { status: 500 });
     }
 
-    return NextResponse.json({ reply });
+    const summary = buildConversationSummary(withAssistant, {
+      appointment: result.appointment,
+      escalation: result.escalation,
+      notificationStatus: result.notificationStatus,
+      order: result.order,
+    });
+
+    updateConversation(conversationId, {
+      title,
+      summary,
+      keyInfo: finalKeyInfo,
+      urgent: withAssistant.urgent || triage.level !== null,
+    });
+
+    const response: ChatResponse = {
+      conversationId,
+      title,
+      summary,
+      keyInfo: finalKeyInfo,
+      reply: result.reply,
+      sources,
+      tools: result.tools,
+      doctors: result.doctors,
+      appointment: result.appointment,
+      escalation: result.escalation,
+      order: result.order,
+      emergencyContacts: contacts,
+      urgent: triage.level !== null,
+      urgencyLevel: triage.level,
+      notificationStatus: result.notificationStatus,
+    };
+
+    return json(response);
   } catch (error) {
-    console.error("[chat] Groq request error", error);
-    return NextResponse.json(
-      {
-        error:
-          "The assistant is temporarily unavailable. Please try again in a moment.",
-      },
-      { status: 502 },
-    );
+    console.error("[chat] agent failed", error);
+    const failure =
+      error instanceof AgentRequestError
+        ? error.message
+        : "The assistant couldn't complete that request. Please try again in a moment.";
+    const status = error instanceof AgentRequestError ? error.status : 502;
+
+    appendMessage(conversationId, {
+      id: `msg-${randomUUID()}`,
+      role: "assistant",
+      content: failure,
+      createdAt: new Date().toISOString(),
+      urgent: triage.level !== null,
+      urgencyLevel: triage.level,
+    });
+
+    updateConversation(conversationId, {
+      summary: `The assistant could not complete this turn. ${failure}`,
+      keyInfo: preKeyInfo,
+      urgent: prepared.urgent || triage.level !== null,
+    });
+
+    return json({ error: failure, conversationId }, { status });
   }
 }

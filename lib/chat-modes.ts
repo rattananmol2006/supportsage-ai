@@ -1,6 +1,8 @@
 import { Briefcase, Stethoscope, type LucideIcon } from "lucide-react";
 
-export type ChatMode = "doctor" | "business";
+import type { ChatMode } from "@/lib/types";
+
+export type { ChatMode };
 
 export type ChatModeConfig = {
   id: ChatMode;
@@ -18,13 +20,14 @@ export const chatModes: ChatModeConfig[] = [
     label: "Doctor",
     tagline: "Clinical support copilot",
     description:
-      "Explain clinical information, summarize symptoms, and draft patient-friendly follow-ups.",
+      "Search the live doctor directory, check real slots, book visits, and escalate urgent symptoms.",
     icon: Stethoscope,
     greeting: "Hi, I am Sage. How can I assist you?",
     suggestions: [
-      "Explain lab results in plain language",
-      "Draft post-visit instructions",
-      "Summarize a patient's symptoms",
+      "I've had typhoid fever for 3 days",
+      "Find a cardiologist in Mumbai",
+      "Book Dr. Meera Iyer",
+      "Show Dr. Vikram Deshmukh's schedule",
     ],
   },
   {
@@ -32,13 +35,14 @@ export const chatModes: ChatModeConfig[] = [
     label: "Business Owner",
     tagline: "Support operations copilot",
     description:
-      "Draft customer replies, resolve escalations, and turn support metrics into decisions.",
+      "Look up orders, apply refund policy, and escalate high-risk cases with a Telegram alert.",
     icon: Briefcase,
     greeting: "Hi, I am Sage. How can I assist you?",
     suggestions: [
-      "Draft a refund response",
-      "Summarize support metrics",
-      "When should we escalate?",
+      "Check order #1042 for a duplicate charge",
+      "Customer wants a refund for order #1093",
+      "Escalate an angry customer to the owner",
+      "Summarize this week's support metrics",
     ],
   },
 ];

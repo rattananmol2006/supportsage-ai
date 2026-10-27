@@ -3,13 +3,14 @@ import { cn } from "cn";
 type LogoProps = {
   className?: string;
   markClassName?: string;
+  href?: string;
 };
 
-export function Logo({ className, markClassName }: LogoProps) {
+export function Logo({ className, markClassName, href = "#top" }: LogoProps) {
   return (
     <a
-      href="#top"
-      aria-label="SupportSage AI — back to top"
+      href={href}
+      aria-label="SupportSage AI"
       className={cn(
         "group inline-flex items-center gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 focus-visible:ring-offset-2",
         className,
