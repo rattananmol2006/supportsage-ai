@@ -2,6 +2,7 @@ import { connection, NextResponse } from "next/server";
 
 import {
   databaseStats,
+  getSettings,
   listAppointments,
   listConversations,
   listDoctors,
@@ -13,12 +14,15 @@ import {
   totalMessageCount,
 } from "@/lib/db";
 import { getKnowledgeStats, knowledgeDocs } from "@/lib/knowledge";
+import { buildCalendarDays } from "@/lib/scheduling";
 import type { DashboardPayload } from "@/lib/types";
 
 export async function GET() {
   await connection();
 
   const knowledge = getKnowledgeStats();
+  const doctors = listDoctors();
+  const appointments = listAppointments();
   const payload: DashboardPayload = {
     stats: {
       ...databaseStats(),
@@ -34,10 +38,16 @@ export async function GET() {
       })),
     },
     conversations: listConversations(),
-    appointments: listAppointments(),
+    appointments,
+    calendar: buildCalendarDays(
+      doctors,
+      appointments,
+      getSettings().timezone,
+      { days: 35 },
+    ),
     escalations: listEscalations(),
     notifications: listNotifications().slice(0, 50),
-    doctors: listDoctors().map(publicDoctor),
+    doctors: doctors.map(publicDoctor),
     orders: listOrders(),
     settings: publicSettings(),
     integrations: {

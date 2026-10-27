@@ -25,7 +25,7 @@ export type Doctor = {
   city: string;
   phone: string;
   secondaryPhone?: string;
-  email: string;
+  email?: string;
   hours: string;
   fee: string;
   languages: string;
@@ -36,6 +36,8 @@ export type Doctor = {
   slotStart: string;
   slotEnd: string;
   slotMinutes: number;
+  sourceTitle?: string;
+  sourceUrl?: string;
   telegramChatId?: string;
   createdAt: string;
 };
@@ -87,8 +89,31 @@ export type Appointment = {
   status: AppointmentStatus;
   calendarUrl: string;
   icsUrl: string;
+  reminderMinutesBefore: number;
+  reminderAt: string;
+  requestedDate?: string;
+  requestedTime?: string;
+  autoRebooked?: boolean;
   notificationStatus: "sent" | "queued" | "failed";
   createdAt: string;
+};
+
+export type CalendarDoctorAvailability = {
+  doctorId: string;
+  doctorName: string;
+  specialty: string;
+  openSlots: number;
+  bookedSlots: number;
+};
+
+export type CalendarDay = {
+  date: string;
+  label: string;
+  isToday: boolean;
+  isPast: boolean;
+  openSlots: number;
+  bookedSlots: number;
+  doctors: CalendarDoctorAvailability[];
 };
 
 export type StoredMessage = {
@@ -208,6 +233,7 @@ export type PublicSettings = {
 };
 
 export type Database = {
+  seedVersion?: number;
   conversations: Conversation[];
   doctors: Doctor[];
   appointments: Appointment[];
@@ -268,6 +294,7 @@ export type DashboardPayload = {
   };
   conversations: ConversationSummary[];
   appointments: Appointment[];
+  calendar: CalendarDay[];
   escalations: Escalation[];
   notifications: Notification[];
   doctors: PublicDoctor[];

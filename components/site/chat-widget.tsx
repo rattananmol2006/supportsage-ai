@@ -6,11 +6,13 @@ import {
   AlertCircle,
   AlertTriangle,
   BadgeCheck,
+  BellRing,
   CalendarDays,
   CheckCircle2,
   Clock,
   Download,
   ExternalLink,
+  FileText,
   LayoutDashboard,
   Mail,
   MapPin,
@@ -33,6 +35,7 @@ import {
   getChatMode,
   type ChatMode,
 } from "@/lib/chat-modes";
+import { formatReminderAt, reminderLabel } from "@/lib/reminders";
 import type {
   Appointment,
   ChatResponse,
@@ -195,10 +198,10 @@ function DoctorCardView({
         <div className="min-w-0">
           <p className="flex flex-wrap items-center gap-1.5 text-[12px] font-semibold leading-4 text-ink">
             {doctor.name}
-            {doctor.verified ? (
+            {doctor.sourceUrl || doctor.verified ? (
               <span className="inline-flex items-center gap-0.5 rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wide text-emerald-700">
                 <BadgeCheck className="size-2.5" />
-                Verified
+                {doctor.sourceUrl ? "ESIC list" : "Verified"}
               </span>
             ) : (
               <span className="rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wide text-amber-700">
@@ -237,13 +240,15 @@ function DoctorCardView({
             <Phone className="size-3" />
             {doctor.phone}
           </a>
-          <a
-            href={`mailto:${doctor.email}`}
-            className="inline-flex items-center gap-1 break-all hover:text-brand hover:underline"
-          >
-            <Mail className="size-3" />
-            {doctor.email}
-          </a>
+          {doctor.email ? (
+            <a
+              href={`mailto:${doctor.email}`}
+              className="inline-flex items-center gap-1 break-all hover:text-brand hover:underline"
+            >
+              <Mail className="size-3" />
+              {doctor.email}
+            </a>
+          ) : null}
         </p>
         <p className="flex items-center gap-1.5">
           <Clock className="size-3 shrink-0" />
@@ -259,6 +264,19 @@ function DoctorCardView({
           ) : null}
         </p>
       </div>
+
+      {doctor.sourceUrl ? (
+        <a
+          href={doctor.sourceUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 inline-flex items-center gap-1 rounded-md border border-line bg-canvas px-1.5 py-1 text-[8.5px] font-medium text-subtle transition-colors hover:border-brand/25 hover:text-brand"
+        >
+          <FileText className="size-2.5" />
+          {doctor.sourceTitle ?? "ESIC source list"}
+          <ExternalLink className="size-2.5" />
+        </a>
+      ) : null}
 
       <div className="mt-2.5 border-t border-line/80 pt-2">
         <SectionLabel>Next available</SectionLabel>
@@ -317,6 +335,21 @@ function AppointmentCardView({ appointment }: { appointment: Appointment }) {
           {appointment.location}
         </p>
         <p>Patient: {appointment.patientName} · {appointment.phone}</p>
+        {appointment.autoRebooked ? (
+          <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[9.5px] leading-4 text-amber-900">
+            Requested{" "}
+            {appointment.requestedDate
+              ? formatDate(appointment.requestedDate)
+              : "day"}{" "}
+            at {appointment.requestedTime ?? "the requested time"} was full —
+            this is the next available slot.
+          </p>
+        ) : null}
+        <p className="flex items-center gap-1.5">
+          <BellRing className="size-3" />
+          Reminder {reminderLabel(appointment.reminderMinutesBefore)} ·{" "}
+          {formatReminderAt(appointment.reminderAt, appointment.timezone)}
+        </p>
       </div>
 
       <div className="mt-2 flex flex-wrap gap-1.5">

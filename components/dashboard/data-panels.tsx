@@ -21,6 +21,7 @@ import {
   formatRelative,
 } from "@/components/dashboard/ui";
 import type {
+  ChatMode,
   DashboardPayload,
   KnowledgeDocSummary,
   KnowledgeType,
@@ -200,53 +201,61 @@ export function OrdersPanel({ orders }: { orders: Order[] }) {
 }
 
 export function KnowledgePanel({
+  mode,
   knowledge,
 }: {
+  mode: ChatMode;
   knowledge: DashboardPayload["knowledge"];
 }) {
   const [search, setSearch] = useState("");
-  const [modeFilter, setModeFilter] = useState<"all" | "doctor" | "business">(
-    "all",
+
+  const scoped = useMemo(
+    () => knowledge.docs.filter((doc) => doc.mode === mode),
+    [knowledge.docs, mode],
   );
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return knowledge.docs.filter((doc) => {
-      if (modeFilter !== "all" && doc.mode !== modeFilter) return false;
+    return scoped.filter((doc) => {
       if (!query) return true;
       return `${doc.id} ${doc.title} ${doc.type}`.toLowerCase().includes(query);
     });
-  }, [knowledge.docs, modeFilter, search]);
+  }, [scoped, search]);
 
-  const emergencyCount = knowledge.docs.filter(
-    (doc) => doc.type === "emergency",
-  ).length;
-  const policyCount = knowledge.docs.filter(
-    (doc) => doc.type === "policy",
-  ).length;
+  const emergencyCount = scoped.filter((doc) => doc.type === "emergency").length;
+  const policyCount = scoped.filter((doc) => doc.type === "policy").length;
+  const doctorCount = scoped.filter((doc) => doc.type === "doctor").length;
 
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
         <StatCard
           label="Knowledge docs"
-          value={knowledge.documents}
+          value={scoped.length}
           detail="Retrieved and cited on every answer"
           icon={BookOpen}
         />
         <StatCard
-          label="Doctor mode"
-          value={knowledge.doctorKnowledge}
-          detail="Clinical triage, directory, booking, labs"
-          icon={Stethoscope}
-          tone="green"
+          label={mode === "doctor" ? "Doctor mode" : "Business mode"}
+          value={scoped.length}
+          detail={
+            mode === "doctor"
+              ? "Clinical triage, directory, booking, labs"
+              : "Orders, refunds, escalations, security"
+          }
+          icon={mode === "doctor" ? Stethoscope : Bot}
+          tone={mode === "doctor" ? "green" : "blue"}
         />
         <StatCard
-          label="Business mode"
-          value={knowledge.businessKnowledge}
-          detail="Orders, refunds, escalations, security"
-          icon={Bot}
-          tone="blue"
+          label={mode === "doctor" ? "Doctor records" : "Policy documents"}
+          value={mode === "doctor" ? doctorCount : policyCount}
+          detail={
+            mode === "doctor"
+              ? "Directory entries in the retrieval set"
+              : "Refund, escalation, and account rules"
+          }
+          icon={mode === "doctor" ? Stethoscope : ShieldAlert}
+          tone={mode === "doctor" ? "brand" : "amber"}
         />
         <StatCard
           label="Safety policies"
@@ -258,41 +267,26 @@ export function KnowledgePanel({
       </div>
 
       <SectionCard
-        title="RAG knowledge base"
-        description="Answers are grounded in these documents. The agent retrieves passages with synonym expansion, prioritises emergency docs during triage, and cites the sources in the chat and transcript."
+        title={
+          mode === "doctor"
+            ? "Doctor care policies and sources"
+            : "Business support policies and sources"
+        }
+        description={
+          mode === "doctor"
+            ? "Doctor-mode answers are grounded only in these clinical, directory, booking, and safety documents. The agent cites each source in the chat and transcript."
+            : "Business-mode answers are grounded only in these order, refund, escalation, and account documents. The agent cites each source in the chat and transcript."
+        }
         action={
-          <div className="flex flex-wrap items-center gap-1.5">
-            <div className="relative w-44 max-w-full">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-subtle" />
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search knowledge…"
-                aria-label="Search knowledge documents"
-                className="h-8 w-full rounded-lg border border-line bg-canvas pl-8 pr-3 text-[10px] text-ink outline-none placeholder:text-subtle/80 focus:border-brand/35 focus:ring-2 focus:ring-brand/10"
-              />
-            </div>
-            {(
-              [
-                { id: "all", label: "All" },
-                { id: "doctor", label: "Doctor" },
-                { id: "business", label: "Business" },
-              ] as const
-            ).map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => setModeFilter(option.id)}
-                aria-pressed={modeFilter === option.id}
-                className={`rounded-md px-2 py-1 text-[9.5px] font-medium transition-colors ${
-                  modeFilter === option.id
-                    ? "bg-brand text-white"
-                    : "text-subtle hover:bg-canvas hover:text-ink"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
+          <div className="relative w-48 max-w-full">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-subtle" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={`Search ${mode} knowledge…`}
+              aria-label={`Search ${mode} knowledge documents`}
+              className="h-8 w-full rounded-lg border border-line bg-canvas pl-8 pr-3 text-[10px] text-ink outline-none placeholder:text-subtle/80 focus:border-brand/35 focus:ring-2 focus:ring-brand/10"
+            />
           </div>
         }
       >

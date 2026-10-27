@@ -1,5 +1,58 @@
+import https from "node:https";
+
 import { getSettings, recordNotification } from "@/lib/db";
 import type { Notification } from "@/lib/types";
+
+type TelegramHttpResponse = {
+  status: number;
+  body: string;
+};
+
+/**
+ * Send the request over IPv4 explicitly. Some Windows/Node environments resolve
+ * api.telegram.org to IPv6 first and hang even though IPv4 works.
+ */
+function postTelegram(
+  url: string,
+  payload: string,
+  timeoutMs = 12_000,
+): Promise<TelegramHttpResponse> {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const request = https.request(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port || 443,
+        path: `${target.pathname}${target.search}`,
+        method: "POST",
+        family: 4,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+        },
+        timeout: timeoutMs,
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () =>
+          resolve({
+            status: response.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString("utf8"),
+          }),
+        );
+      },
+    );
+
+    request.on("timeout", () => {
+      request.destroy(new Error("Telegram request timed out."));
+    });
+    request.on("error", reject);
+    request.write(payload);
+    request.end();
+  });
+}
 
 type TelegramInput = {
   text: string;
@@ -63,25 +116,18 @@ export async function sendTelegramNotification({
   }
 
   try {
-    const response = await fetch(
+    const response = await postTelegram(
       `https://api.telegram.org/bot${config.token}/sendMessage`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: recipient,
-          text: text.slice(0, 4000),
-          disable_web_page_preview: true,
-        }),
-        signal: AbortSignal.timeout(12_000),
-        cache: "no-store",
-      },
+      JSON.stringify({
+        chat_id: recipient,
+        text: text.slice(0, 4000),
+        disable_web_page_preview: true,
+      }),
     );
 
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
+    if (response.status < 200 || response.status >= 300) {
       console.error(
-        `[telegram] send failed (${response.status}): ${detail.slice(0, 200)}`,
+        `[telegram] send failed (${response.status}): ${response.body.slice(0, 200)}`,
       );
       return {
         status: "failed",

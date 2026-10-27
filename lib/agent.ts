@@ -16,8 +16,11 @@ import {
 } from "@/lib/db";
 import { mergeKeyInfo } from "@/lib/insights";
 import { buildRagContext, type RetrievedChunk } from "@/lib/rag";
+import { DEFAULT_REMINDER_MINUTES, reminderLabel } from "@/lib/reminders";
 import {
   addDays,
+  computeReminderAt,
+  findNextOpenSlot,
   getDoctorSchedule as scheduleForDoctor,
   isBookableSlot,
   nextAvailableSlots,
@@ -123,6 +126,7 @@ const CITY_ALIASES: Record<string, string> = {
   gurgaon: "new delhi",
   gurugram: "new delhi",
   noida: "new delhi",
+  chd: "chandigarh",
 };
 
 const SPECIALTY_HINTS: Array<{ pattern: RegExp; terms: string[] }> = [
@@ -159,6 +163,22 @@ const SPECIALTY_HINTS: Array<{ pattern: RegExp; terms: string[] }> = [
   {
     pattern: /pregnan|obstetric|gynae|gyne|women/i,
     terms: ["obstetrics", "gynaecology", "gynecology"],
+  },
+  {
+    pattern: /eye|eyesight|vision|cataract|ophthal/i,
+    terms: ["ophthalmology", "eye"],
+  },
+  {
+    pattern: /ear|nose|throat|sinus|hearing|ent/i,
+    terms: ["ent", "otolaryngology"],
+  },
+  {
+    pattern: /surgery|surgeon|lump|hernia|gallbladder/i,
+    terms: ["general surgery", "surgeon"],
+  },
+  {
+    pattern: /general physician|family doctor|gp|checkup|check-up/i,
+    terms: ["general practice", "general medicine"],
   },
 ];
 
@@ -221,7 +241,7 @@ const TOOL_DEFINITIONS: Record<ChatMode, ToolDefinition[]> = {
       function: {
         name: "book_appointment",
         description:
-          "Book the appointment as soon as the patient has supplied their name, phone, doctor, date, time, and reason. Use this immediately when they accept a listed slot or give a specific date and time. Do not re-search or re-escalate instead of booking. Always checks live availability before writing the booking.",
+          "Book the appointment as soon as the patient has supplied their name, phone, doctor, date, time, and reason. Use this immediately when they accept a listed slot or give a specific date and time. Do not re-search or re-escalate instead of booking. Always checks live availability. If the requested slot is full, it automatically books the next open slot on or after that date and sets a reminder.",
         parameters: {
           type: "object",
           properties: {
@@ -243,6 +263,11 @@ const TOOL_DEFINITIONS: Record<ChatMode, ToolDefinition[]> = {
             reason: {
               type: "string",
               description: "Short reason for the visit.",
+            },
+            reminderMinutesBefore: {
+              type: "integer",
+              description:
+                "Optional reminder lead time in minutes: 15, 30, 60, 120, 1440 (1 day), 2880, or 10080 (1 week). Defaults to 60.",
             },
           },
           required: [
@@ -528,7 +553,7 @@ function searchDoctors(
   const notes: string[] = [];
   if (cityFallback) {
     notes.push(
-      `No doctor is listed in ${city}. Showing telehealth and nearest available options instead.`,
+      `The live directory currently covers Chandigarh only, and no doctor is listed in ${city}. Tell the patient that clearly instead of presenting a Chandigarh doctor as local.`,
     );
   }
   if (urgentFallback) {
@@ -544,7 +569,7 @@ function searchDoctors(
     note: notes.length > 0 ? notes.join(" ") : undefined,
     availableCities: [...new Set(allDoctors.map((doctor) => doctor.city))],
     dataNote:
-      "Records marked verified=false are demo seed data. Records marked verified=true were added by the clinic owner.",
+      "Doctors with sourceUrl are transcribed from the ESIC authorised medical attendants list for Chandigarh (2023-24). That list does not publish consultation hours or fees, so say the clinic must be called to confirm those. Online booking windows are demo schedules; live availability is checked again at booking time.",
   };
 }
 
@@ -622,11 +647,12 @@ async function bookAppointment(
     };
   }
 
-  const date = normalizeDate(rawDate, timezone);
-  const time = normalizeTime(rawTime);
+  const requestedDate = normalizeDate(rawDate, timezone);
+  const requestedTime = normalizeTime(rawTime);
   const appointments = listAppointments();
+  const today = todayInTimeZone(timezone);
 
-  if (!date) {
+  if (!requestedDate) {
     return {
       ok: false,
       error: "Date must be YYYY-MM-DD, today, or tomorrow.",
@@ -634,7 +660,16 @@ async function bookAppointment(
     };
   }
 
-  if (!time) {
+  if (requestedDate < today) {
+    return {
+      ok: false,
+      error:
+        "That date has already passed. Offer one of the live upcoming slots instead.",
+      availableSlots: nextAvailableSlots(doctor, appointments, timezone, 8),
+    };
+  }
+
+  if (!requestedTime) {
     return {
       ok: false,
       error: "Time must be in 24-hour HH:MM format.",
@@ -642,15 +677,47 @@ async function bookAppointment(
     };
   }
 
-  if (!isBookableSlot(doctor, date, time, appointments, timezone)) {
-    return {
-      ok: false,
-      error:
-        "That slot is not available. Offer one of the live slots returned in this result.",
-      availableSlots: nextAvailableSlots(doctor, appointments, timezone, 8),
-    };
+  const reminderValue = Number(args.reminderMinutesBefore);
+  const reminderMinutesBefore =
+    Number.isFinite(reminderValue) &&
+    reminderValue >= 5 &&
+    reminderValue <= 10080
+      ? Math.round(reminderValue)
+      : DEFAULT_REMINDER_MINUTES;
+
+  let date = requestedDate;
+  let time = requestedTime;
+  let autoRebooked = false;
+
+  if (!isBookableSlot(doctor, requestedDate, requestedTime, appointments, timezone)) {
+    const nextSlot = findNextOpenSlot(
+      doctor,
+      appointments,
+      timezone,
+      requestedDate,
+      requestedTime,
+    );
+
+    if (!nextSlot) {
+      return {
+        ok: false,
+        error:
+          "The requested day is full and there is no open slot in the next 45 days. Ask the patient to call the clinic.",
+        availableSlots: nextAvailableSlots(doctor, appointments, timezone, 8),
+      };
+    }
+
+    date = nextSlot.date;
+    time = nextSlot.time;
+    autoRebooked = true;
   }
 
+  const reminderAt = computeReminderAt(
+    date,
+    time,
+    timezone,
+    reminderMinutesBefore,
+  );
   const appointmentReference = reference("APT");
   const calendarUrl = buildGoogleCalendarUrl({
     reference: appointmentReference,
@@ -664,6 +731,7 @@ async function bookAppointment(
     durationMinutes: doctor.slotMinutes,
     reason,
     timezone,
+    reminderMinutesBefore,
   });
 
   let appointment = createAppointment({
@@ -687,6 +755,11 @@ async function bookAppointment(
     // The database assigns the canonical appointment id. Build the download
     // link from that id so the .ics route always resolves to this booking.
     icsUrl: "",
+    reminderMinutesBefore,
+    reminderAt,
+    requestedDate: autoRebooked ? requestedDate : undefined,
+    requestedTime: autoRebooked ? requestedTime : undefined,
+    autoRebooked: autoRebooked || undefined,
     notificationStatus: "queued",
   });
 
@@ -702,6 +775,12 @@ async function bookAppointment(
     `Phone: ${phone}`,
     email ? `Email: ${email}` : "",
     `Date: ${date} at ${time} (${timezone})`,
+    ...(autoRebooked
+      ? [
+          `Requested: ${requestedDate} at ${requestedTime} — unavailable, booked next open slot`,
+        ]
+      : []),
+    `Reminder: ${reminderLabel(reminderMinutesBefore)} (${reminderAt})`,
     `Reason: ${reason}`,
     `Location: ${doctor.address}`,
     "Booked through SupportSage AI",
@@ -738,15 +817,32 @@ async function bookAppointment(
     ok: true,
     appointment,
     doctor: card,
+    autoRebooked,
+    requested: autoRebooked
+      ? { date: requestedDate, time: requestedTime }
+      : undefined,
+    booked: { date, time },
+    reminder: {
+      minutesBefore: reminderMinutesBefore,
+      label: reminderLabel(reminderMinutesBefore),
+      at: reminderAt,
+    },
     notificationStatus: notification.status,
     calendar: {
       google: appointment.calendarUrl,
       ics: appointment.icsUrl,
     },
-    instruction:
-      notification.status === "sent"
-        ? "Confirm the booking and tell the patient the clinic has been notified."
-        : "Confirm the booking. Say the Telegram alert is queued because the bot is not configured; do not claim it was sent.",
+    instruction: autoRebooked
+      ? `The requested slot on ${requestedDate} at ${requestedTime} was full. Booked the next open slot on ${date} at ${time}. Tell the patient clearly that the requested day/slot was unavailable, give the new date and time, and confirm the reminder for ${reminderLabel(reminderMinutesBefore)} before. ${
+          notification.status === "sent"
+            ? "The clinic has been notified."
+            : "The Telegram alert is queued because the bot is not configured; do not claim it was sent."
+        }`
+      : `Confirm the booking, give the reference and exact date/time, and mention the reminder for ${reminderLabel(reminderMinutesBefore)} before. ${
+          notification.status === "sent"
+            ? "Tell the patient the clinic has been notified."
+            : "Say the Telegram alert is queued because the bot is not configured; do not claim it was sent."
+        }`,
   };
 }
 
@@ -986,11 +1082,15 @@ function buildSystemPrompt(input: AgentInput): string {
     input.mode === "doctor"
       ? `DOCTOR-MODE RULES
 - You support patients and clinic staff. The live directory is the only source of doctor contact details.
+- The directory is transcribed from the ESIC authorised medical attendants list for Chandigarh (2023–24). The list contains names, qualifications, clinic addresses, phones, and specialties. It does not publish consultation hours or fees. For those, say "call the clinic to confirm" — never invent them. Online booking windows are demo schedules, not official clinic timings.
 - Any suspected typhoid, fever of 3+ days, persistent vomiting, dehydration, severe abdominal pain, confusion, bleeding, breathlessness, or chest pain is urgent. Call escalate_case and search for urgent/internal-medicine doctors. Do NOT give a self-care-only answer.
-- For typhoid, say clearly that same-day clinical assessment is needed, do not recommend self-started antibiotics, and give a doctor's phone, address, fee, and live slots.
-- Ask for the patient's city when they want the nearest doctor. If the situation is urgent, still provide urgent-care/teleconsult options immediately.
+- For typhoid, say clearly that same-day clinical assessment is needed, do not recommend self-started antibiotics, and give a doctor's phone, address, and live slots. Do not quote a fee unless a tool explicitly returned one.
+- Ask for the patient's city or sector when they want the nearest doctor. If the situation is urgent, still provide urgent-care options immediately. The current directory is Chandigarh-based; if the patient is outside Chandigarh, say so instead of pretending a local doctor is nearby.
+- Treat every new symptom or specialty as a fresh search. Call search_doctors again and choose by specialty, area, and the patient's problem. Never default to the same doctor just because they appeared earlier in the conversation, and never recommend one doctor for every disease.
 - When the patient accepts a slot or supplies a doctor, date, time, name, and phone, call book_appointment in this turn. Never reply with slot times as if the booking were done, and never re-escalate instead of booking.
-- Only confirm an appointment after book_appointment returns ok=true. Share the reference and exact date/time.
+- If the requested day or slot is full, book_appointment automatically moves to the next open slot and returns autoRebooked=true. Tell the patient plainly that the requested slot was unavailable, give the new date and time, and confirm the reminder. Do not hide the change.
+- Every booking has a reminder. Mention the reminder lead time (for example, "1 hour before") in the confirmation. If the patient asks for a different reminder, pass reminderMinutesBefore to book_appointment.
+- Only confirm an appointment after book_appointment returns ok=true. Share the reference, exact date/time, and reminder. Use the exact durationMinutes returned by the tool; never guess or round the slot length.
 - If an open case already exists for this conversation, do not open a duplicate. Add new details to the existing case and reuse its reference.
 - Never invent availability, contact details, fees, or a doctor's schedule.`
       : `BUSINESS-OWNER-MODE RULES
@@ -1034,7 +1134,9 @@ GLOBAL RULES
 - For a medical emergency, tell the person to call 112 (India) or 911 (US) or go to the nearest emergency department immediately. Then give the nearest urgent-care contact and offer to escalate. An emergency escalation must be created before you finish the reply.
 - For any new urgent case, call escalate_case in this turn. Do not wait for more details before escalating. If this conversation already has an open case, reuse that reference and describe it as the existing case; do not claim to have opened a new one.
 - If a tool reports notificationStatus "queued", say the alert is queued because Telegram is not configured. Do not say it was sent or that the clinic/owner was alerted.
-- Be specific: use names, phone numbers, addresses, fees, dates, times, and references returned by tools.
+- When a doctor record includes sourceUrl, the name, qualification, address, phone, and specialty come from the ESIC AMA list. Hours and fees are not in that list; say to call the clinic. Do not present the demo booking window as an official clinic timetable.
+- Every appointment result includes a reminder. Mention the reminder lead time and never say a reminder was set unless the booking result includes one.
+- Be specific: use names, phone numbers, addresses, dates, times, reminders, and references returned by tools.
 - Keep the reply under about 240 words. Plain text only: short paragraphs and hyphen bullets. No markdown headings, bold, tables, or emoji except a single warning marker if needed.
 - End with one clear next action. Do not ask for information the conversation already contains.`;
 }
@@ -1198,7 +1300,14 @@ function pushToolMessage(
 
 function fallbackReply(state: ToolState): string {
   if (state.appointment) {
-    return `Your appointment is confirmed with ${state.appointment.doctorName} on ${state.appointment.date} at ${state.appointment.time}. The reference is ${state.appointment.reference}. The clinic is at ${state.appointment.location}.`;
+    const appointment = state.appointment;
+    const reminder = `A reminder is set for ${reminderLabel(
+      appointment.reminderMinutesBefore,
+    )} before.`;
+    const moved = appointment.autoRebooked
+      ? `Your requested slot on ${appointment.requestedDate} at ${appointment.requestedTime} was full, so I booked the next available slot on ${appointment.date} at ${appointment.time}.`
+      : `Your appointment is confirmed with ${appointment.doctorName} on ${appointment.date} at ${appointment.time}.`;
+    return `${moved} The reference is ${appointment.reference}. ${reminder} The clinic is at ${appointment.location}.`;
   }
   if (state.escalation) {
     return `I have opened ${state.escalation.priority}-priority case ${state.escalation.reference}. The clinic team can review the full conversation and your contact details.`;
@@ -1310,10 +1419,26 @@ async function postProcess(
   }
 
   if (state.appointment) {
-    const ref = state.appointment.reference;
+    const appointment = state.appointment;
+    const ref = appointment.reference;
     if (!normalizeForMatch(output).includes(normalizeForMatch(ref))) {
       additions.push(
-        `Appointment ${ref} is confirmed with ${state.appointment.doctorName} on ${state.appointment.date} at ${state.appointment.time}.`,
+        `Appointment ${ref} is confirmed with ${appointment.doctorName} on ${appointment.date} at ${appointment.time}.`,
+      );
+    }
+
+    if (
+      appointment.autoRebooked &&
+      !/\b(full|unavailable|next available|next open)\b/i.test(output)
+    ) {
+      additions.push(
+        `Your requested slot on ${appointment.requestedDate} at ${appointment.requestedTime} was full, so I booked the next open slot on ${appointment.date} at ${appointment.time}.`,
+      );
+    }
+
+    if (!/\bremind/i.test(output)) {
+      additions.push(
+        `A reminder is set for ${reminderLabel(appointment.reminderMinutesBefore)} before the appointment.`,
       );
     }
   }
@@ -1354,8 +1479,11 @@ async function postProcess(
         .slice(0, 2)
         .map((slot) => `${slot.date} at ${slot.time}`)
         .join(" or ");
+      const feeText = /^fee\b/i.test(primary.fee)
+        ? primary.fee
+        : `Fee ${primary.fee}`;
       additions.push(
-        `Urgent option: ${primary.name} (${primary.specialty}), ${primary.clinic}, ${primary.address}. Phone ${primary.phone}. Fee ${primary.fee}. Next slots: ${slots || "call the clinic for same-day availability"}.`,
+        `Urgent option: ${primary.name} (${primary.specialty}), ${primary.clinic}, ${primary.address}. Phone ${primary.phone}. ${feeText}. Next slots: ${slots || "call the clinic for same-day availability"}.`,
       );
     }
   }

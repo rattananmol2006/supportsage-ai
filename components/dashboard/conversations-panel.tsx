@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   AlertTriangle,
+  BellRing,
   CalendarDays,
   CheckCircle2,
   Clock,
@@ -36,6 +37,7 @@ import {
   phoneHref,
   priorityTone,
 } from "@/components/dashboard/ui";
+import { formatReminderAt, reminderLabel } from "@/lib/reminders";
 import type {
   Appointment,
   ChatMode,
@@ -111,8 +113,10 @@ function DoctorRecord({ doctor }: { doctor: DoctorResult }) {
         <div>
           <p className="flex flex-wrap items-center gap-1.5 text-[11.5px] font-semibold text-ink">
             {doctor.name}
-            {doctor.verified ? (
-              <Pill tone="green">Verified</Pill>
+            {doctor.sourceUrl ? (
+              <Pill tone="green">ESIC list</Pill>
+            ) : doctor.verified ? (
+              <Pill tone="green">Clinic added</Pill>
             ) : (
               <Pill tone="amber">Demo record</Pill>
             )}
@@ -144,13 +148,15 @@ function DoctorRecord({ doctor }: { doctor: DoctorResult }) {
             <Phone className="size-3" />
             {doctor.phone}
           </a>
-          <a
-            href={`mailto:${doctor.email}`}
-            className="inline-flex items-center gap-1 hover:text-brand hover:underline"
-          >
-            <Mail className="size-3" />
-            {doctor.email}
-          </a>
+          {doctor.email ? (
+            <a
+              href={`mailto:${doctor.email}`}
+              className="inline-flex items-center gap-1 hover:text-brand hover:underline"
+            >
+              <Mail className="size-3" />
+              {doctor.email}
+            </a>
+          ) : null}
         </p>
         <p className="flex items-center gap-1.5">
           <Clock className="size-3" />
@@ -217,6 +223,17 @@ function AppointmentRecord({ appointment }: { appointment: Appointment }) {
       </div>
       <p className="mt-1.5 text-[10px] leading-4 text-emerald-900/75">
         {appointment.location}
+      </p>
+      {appointment.autoRebooked ? (
+        <p className="mt-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-1 text-[9px] leading-4 text-amber-900">
+          Requested {appointment.requestedDate} at {appointment.requestedTime}{" "}
+          was full — booked the next available slot.
+        </p>
+      ) : null}
+      <p className="mt-1.5 flex items-center gap-1.5 text-[9.5px] font-medium text-emerald-800">
+        <BellRing className="size-3" />
+        Reminder {reminderLabel(appointment.reminderMinutesBefore)} ·{" "}
+        {formatReminderAt(appointment.reminderAt, appointment.timezone)}
       </p>
       <div className="mt-2 flex flex-wrap gap-1.5">
         <a
@@ -455,6 +472,7 @@ function DetailSkeleton() {
 }
 
 export function ConversationsPanel({
+  mode,
   conversations,
   selectedId,
   detail,
@@ -462,6 +480,7 @@ export function ConversationsPanel({
   onSelect,
   onDelete,
 }: {
+  mode: ChatMode;
   conversations: ConversationSummary[];
   selectedId?: string;
   detail: ConversationDetail | null;
@@ -470,14 +489,13 @@ export function ConversationsPanel({
   onDelete: (id: string) => Promise<void>;
 }) {
   const [search, setSearch] = useState("");
-  const [modeFilter, setModeFilter] = useState<"all" | ChatMode>("all");
   const [urgentOnly, setUrgentOnly] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     return conversations.filter((conversation) => {
-      if (modeFilter !== "all" && conversation.mode !== modeFilter) return false;
+      if (conversation.mode !== mode) return false;
       if (urgentOnly && !conversation.urgent) return false;
       if (!query) return true;
       const haystack =
@@ -488,7 +506,7 @@ export function ConversationsPanel({
           .join(" ")}`.toLowerCase();
       return haystack.includes(query);
     });
-  }, [conversations, modeFilter, search, urgentOnly]);
+  }, [conversations, mode, search, urgentOnly]);
 
   const groups = groupConversations(filtered);
   const conversation = detail?.conversation;
@@ -528,27 +546,10 @@ export function ConversationsPanel({
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-1">
-            {(
-              [
-                { id: "all", label: "All" },
-                { id: "doctor", label: "Doctor" },
-                { id: "business", label: "Business" },
-              ] as const
-            ).map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => setModeFilter(option.id)}
-                aria-pressed={modeFilter === option.id}
-                className={`rounded-md px-2 py-1 text-[9.5px] font-medium transition-colors ${
-                  modeFilter === option.id
-                    ? "bg-brand text-white"
-                    : "text-subtle hover:bg-canvas hover:text-ink"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
+            <ModePill mode={mode} />
+            <span className="text-[8.5px] font-medium text-subtle">
+              {filtered.length} chat{filtered.length === 1 ? "" : "s"}
+            </span>
             <button
               type="button"
               onClick={() => setUrgentOnly((current) => !current)}

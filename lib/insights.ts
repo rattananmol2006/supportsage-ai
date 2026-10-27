@@ -250,23 +250,34 @@ export function extractKeyInfo(
     keyInfo.duration = `${wordToNumber(duration[1])} ${duration[2].toLowerCase()}`;
   }
 
-  const specialty = SPECIALTY_RULES.find((rule) => rule.pattern.test(text));
-  if (specialty) keyInfo.specialty = specialty.label;
+  if (mode === "doctor") {
+    const specialty = SPECIALTY_RULES.find((rule) => rule.pattern.test(text));
+    if (specialty) keyInfo.specialty = specialty.label;
 
-  let matchedDoctor = "";
-  for (const doctor of doctors) {
-    const fullName = doctor.name.replace(/^Dr\.?\s*/i, "");
-    if (lower.includes(doctor.name.toLowerCase())) {
-      matchedDoctor = doctor.name;
-      break;
+    let matchedDoctor = "";
+    for (const doctor of doctors) {
+      const fullName = doctor.name.replace(/^Dr\.?\s*/i, "");
+      if (
+        lower.includes(doctor.name.toLowerCase()) ||
+        lower.includes(fullName.toLowerCase())
+      ) {
+        matchedDoctor = doctor.name;
+        break;
+      }
+      const lastName = fullName.split(/\s+/).at(-1) ?? "";
+      if (
+        lastName.length > 3 &&
+        new RegExp(
+          `\\bDr\\.?\\s+${lastName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
+          "i",
+        ).test(text)
+      ) {
+        matchedDoctor = doctor.name;
+        break;
+      }
     }
-    const lastName = fullName.split(/\s+/).at(-1) ?? "";
-    if (lastName.length > 3 && new RegExp(`\\b${lastName}\\b`, "i").test(text)) {
-      matchedDoctor = doctor.name;
-      break;
-    }
+    if (matchedDoctor) keyInfo.doctor = matchedDoctor;
   }
-  if (matchedDoctor) keyInfo.doctor = matchedDoctor;
 
   const orderMatch =
     text.match(/\border\s*#?\s*(\d{3,})\b/i) ?? text.match(/#(\d{3,})\b/);
@@ -370,11 +381,11 @@ export function buildConversationSummary(
           .flatMap((message) => message.doctors ?? [])
           .find((item) => item.name === keyInfo.doctor)
       : undefined);
-  if (doctor) {
+  if (conversation.mode === "doctor" && doctor) {
     parts.push(
       `Matched ${doctor.name} (${doctor.specialty}, ${doctor.city}) with contact and live slots.`,
     );
-  } else if (keyInfo.doctor) {
+  } else if (conversation.mode === "doctor" && keyInfo.doctor) {
     parts.push(`Doctor referenced: ${keyInfo.doctor}.`);
   }
 

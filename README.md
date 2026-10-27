@@ -8,8 +8,11 @@ This repository is a working demo, not a mock: chats persist, doctor records are
 are checked against booked appointments, appointments generate Google Calendar and `.ics` handoff
 links, and every escalation is written to the dashboard with its Telegram delivery status.
 
-> Demo data is fictional. The seeded doctors, orders, phone numbers, and email addresses are for
-> demonstration only. Replace them before using this with real patients or customers.
+> The doctor directory is real: 20 Chandigarh records are transcribed from the ESIC authorised medical
+> attendants list (effective 01-06-2023 to 31-05-2024). The ESIC list does not publish consultation
+> hours, fees, or languages, so those fields say “call clinic to confirm” and the booking windows are
+> labelled demo schedules. Orders, business records, and dashboard authentication remain demo data.
+> Replace the demo order book before using this with real customers.
 
 ## What works
 
@@ -18,11 +21,17 @@ links, and every escalation is written to the dashboard with its Telegram delive
 - Urgency triage for emergency red flags, suspected typhoid, fever of 3+ days, severe abdominal
   pain, dehydration, breathing difficulty, chest pain, and similar symptoms.
 - Retrieval-augmented answers from a 24-document clinical and operational knowledge base.
-- Live doctor search by name, specialty, city, or problem.
-- Real doctor cards with clinic, address, phone, email, hours, fee, languages, teleconsult and
-  urgent-care flags, and the next available slots.
+- Search across 20 real Chandigarh ESIC doctors by name, specialty, clinic, sector, or health problem.
+  Skin, eye, child health, orthopaedics, ENT, gynaecology, medicine, and general surgery queries resolve
+  to different specialists rather than one repeated fictional doctor.
+- Doctor cards with the ESIC source link, qualification, clinic, address, phone, and next available
+  slots. Email is shown only when the record actually has one.
 - Appointment booking with live slot validation, reference generation, Google Calendar link, and
-  downloadable `.ics` file.
+  downloadable `.ics` file with a `VALARM` reminder.
+- If the requested day or slot is full, Sage books the next open slot and clearly tells the patient
+  that their first choice was unavailable.
+- Every appointment stores a reminder lead time (15 minutes to 1 week before) and can be changed from
+  the dashboard.
 - Urgent escalation routed to the matched doctor with a Telegram alert attempt and dashboard record.
 - A prominent emergency panel with local emergency numbers and the clinic phone.
 
@@ -36,19 +45,31 @@ links, and every escalation is written to the dashboard with its Telegram delive
 
 ### Owner dashboard (`/dashboard`)
 
-Seven working sections, all backed by the same JSON database:
+The dashboard is split into three visible groups so Doctor and Business data never mix:
 
-1. **Conversations** — ChatGPT-style conversation list, AI summaries, extracted facts, full
+**Doctor care**
+
+1. **Doctor chats** — only Doctor-mode conversations, with AI summaries, extracted facts, full
    transcripts, linked appointments and cases, sources, tools, and delivery status.
-2. **Appointments** — confirmed, completed, and cancelled bookings; status changes; Google Calendar
-   and `.ics` handoff.
-3. **Escalations** — open, acknowledged, and resolved cases; priority, owner routing, and transcript
-   links.
-4. **Directory** — searchable doctor records, adding verified records, and removing stale ones.
-5. **Orders** — the seeded order book exposed to the business agent.
-6. **Integrations** — Groq and Telegram connection status, clinic settings, Telegram setup, test
-   alert, and the append-only notification log.
-7. **Knowledge** — all 24 knowledge documents with type, mode, and search/filter controls.
+2. **Appointments** — confirmed, completed, and cancelled bookings; status changes; reminder timing;
+   automatic next-slot rebooking notes; Google Calendar and `.ics` handoff.
+3. **Calendar** — 35-day availability view (last 7 days, today, next 4 weeks), doctor filter, open and
+   booked counts per doctor/day, day detail, appointments, and upcoming reminders.
+4. **Directory** — 20 real Chandigarh ESIC doctors with source links, search, add, and remove.
+5. **Doctor cases** — Doctor-mode escalations only.
+6. **Doctor policies** — Doctor-mode knowledge documents only.
+
+**Business support**
+
+7. **Business chats** — only Business-mode conversations.
+8. **Orders** — the seeded order book exposed to the business agent.
+9. **Business cases** — Business-mode escalations only, never routed to a doctor.
+10. **Business policies** — Business-mode knowledge documents only.
+
+**Platform**
+
+11. **Integrations** — Groq and Telegram connection status, clinic settings, Telegram setup, test
+    alert, and the append-only notification log.
 
 ## Quick start
 
@@ -98,24 +119,24 @@ delivered.
 Open the chat, choose **Doctor**, and send:
 
 > I have had a high fever of 103F for four days with a severe headache and abdominal pain. I think
-> it might be typhoid. I am in Mumbai and need help today.
+> it might be typhoid. I live in Sector 20, Chandigarh, and need help today.
 
 Expected behavior:
 
 - An urgent pathway banner and emergency contacts appear.
 - Sage retrieves typhoid and fever sources and cites them.
-- A real doctor card appears for the urgent/internal-medicine match (normally Dr. Ishaan Verma in
-  Mumbai), with phone, clinic address, fee, and live slots.
+- A real Chandigarh ESIC doctor card appears (for example Dr. Vinod Kumar Rampal, General Medicine,
+  Sector 20-D) with phone, clinic address, qualification, ESIC source link, and live slots.
 - An urgent escalation is created and the Telegram alert is queued or sent depending on settings.
 - Follow up with a specific slot:
 
-> Yes, please book the 08:00 slot on Wednesday 28 October 2026 with Dr. Ishaan Verma for Anmol
-> Rattan. Phone +91 98765 43210, email anmol@example.com. Reason: fever and suspected typhoid
-> follow-up. Video consult is fine.
+> Yes, please book the earliest slot with Dr. Vinod Kumar Rampal for Anmol Rattan. Phone
+> +91 98765 43210. Reason: fever and suspected typhoid follow-up. Remind me one day before.
 
 The reply must confirm the booking only after `book_appointment` succeeds. It includes the
-appointment reference, date, time, calendar link, and `.ics` link. The dashboard shows the linked
-conversation, appointment, and escalation.
+appointment reference, date, time, reminder lead time, calendar link, and `.ics` link. If the
+requested slot is full, Sage books the next open slot and states clearly that the first choice was
+unavailable. The dashboard shows the linked conversation, appointment, and escalation.
 
 ### 2. Business refund flow
 
@@ -129,13 +150,15 @@ Expected behavior:
 - Sage looks up order `#1042` and states the verified duplicate charge.
 - A refund escalation is created with a reference, priority, policy note, and Telegram status.
 - The conversation summary and key facts contain the order and customer, but no doctor routing.
-- The dashboard **Escalations** tab shows the refund case routed to the owner queue.
+- The dashboard **Business cases** tab shows the refund case routed to the owner queue.
 
 ### 3. Dashboard walkthrough
 
-Use **Conversations** to inspect the stored transcript, **Appointments** to download the `.ics` or
-open Google Calendar, **Escalations** to acknowledge or resolve cases, **Directory** to add a doctor,
-and **Integrations** to inspect the notification log.
+Use **Doctor chats** to inspect the clinical transcript, **Appointments** to change the reminder or
+download the `.ics`, **Calendar** to see 35-day availability and reminders, **Doctor cases** to
+acknowledge clinical escalations, and **Directory** to browse the real Chandigarh ESIC list. Switch to
+the **Business support** group for Business chats, Orders, cases, and policies. **Integrations** holds
+the notification log.
 
 ## Architecture
 
@@ -168,13 +191,14 @@ Key files:
 | `lib/rag.ts` | Tokenizer, synonym expansion, document ranking, source refs, context builder |
 | `lib/knowledge.ts` | 24-document knowledge base (15 doctor, 9 business) |
 | `lib/db.ts` | JSON persistence, CRUD, settings, public records, stats |
-| `lib/seed.ts` | Fictional doctors, orders, and initial settings |
-| `lib/scheduling.ts` | Working-day, slot, timezone, and availability logic |
-| `lib/calendar.ts` | Google Calendar event URLs and ICS generation |
+| `lib/seed.ts` | 20 real Chandigarh ESIC doctors, demo orders, and initial settings |
+| `lib/scheduling.ts` | Working-day, slot, timezone, availability, next-open-slot, and calendar logic |
+| `lib/reminders.ts` | Reminder options, labels, and reminder-time formatting |
+| `lib/calendar.ts` | Google Calendar event URLs and ICS generation with `VALARM` |
 | `lib/telegram.ts` | Telegram delivery, status handling, notification log |
 | `lib/insights.ts` | Key-fact extraction, summaries, titles, intent labels |
 | `components/site/chat-widget.tsx` | Persisted chat UI, mode switching, cards, emergency state |
-| `components/dashboard/` | Dashboard shell and all seven panels |
+| `components/dashboard/` | Dashboard shell, grouped Doctor/Business panels, and calendar |
 | `lib/types.ts` | Shared data and API types |
 
 ## RAG retrieval
@@ -252,8 +276,8 @@ Remove-Item .data -Recurse -Force   # Windows PowerShell
 npm run start
 ```
 
-Deleting `.data/` restores the fictional seed data on the next request. Restart the server after a
-manual reset because the JSON database is cached per process.
+Deleting `.data/` restores the seed directory (real ESIC doctors plus demo orders) on the next
+request. Restart the server after a manual reset because the JSON database is cached per process.
 
 ## API reference
 
@@ -270,7 +294,7 @@ All endpoints are server-side and return JSON unless noted. List endpoints wrap 
 | `POST` | `/api/doctors` | Add a verified doctor record |
 | `DELETE` | `/api/doctors/:id` | Remove a doctor record |
 | `GET` | `/api/appointments` | Appointment list |
-| `PATCH` | `/api/appointments/:id` | Set status to `confirmed`, `completed`, or `cancelled` |
+| `PATCH` | `/api/appointments/:id` | Set status, or change `reminderMinutesBefore` |
 | `GET` | `/api/appointments/:id/ics` | Download the calendar file |
 | `GET` | `/api/escalations` | Escalation list |
 | `PATCH` | `/api/escalations/:id` | Set status to `open`, `acknowledged`, or `resolved` |
@@ -284,7 +308,7 @@ All endpoints are server-side and return JSON unless noted. List endpoints wrap 
 ```bash
 curl -X POST http://localhost:3000/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"mode":"doctor","message":"I have had a high fever for four days and think it is typhoid. I am in Mumbai."}'
+  -d '{"mode":"doctor","message":"I have had a high fever for four days and think it is typhoid. I am in Sector 20, Chandigarh."}'
 ```
 
 The response includes:
@@ -311,33 +335,22 @@ included only when the relevant tool returned a record (or, for contacts, in Doc
 To continue the same conversation, include `conversationId`. Sending a different mode with that id is
 rejected with `400`.
 
-### Doctor record example
+### Adding a doctor record
 
-```bash
-curl -X POST http://localhost:3000/api/doctors \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Dr. Asha Rao",
-    "specialty": "Internal Medicine",
-    "qualifications": "MBBS, MD",
-    "clinic": "Harbour Clinic",
-    "address": "12 Marine Drive, Mumbai 400002",
-    "city": "Mumbai",
-    "phone": "+91 90000 12345",
-    "email": "asha.rao@example.com",
-    "hours": "Mon–Sat, 9:00 AM – 5:00 PM",
-    "fee": "₹800 consultation",
-    "languages": "English, Hindi",
-    "slotStart": "09:00",
-    "slotEnd": "17:00",
-    "slotMinutes": 30,
-    "workingDays": [1, 2, 3, 4, 5, 6],
-    "teleconsult": true,
-    "urgentCare": true
-  }'
-```
+Add doctors from **Dashboard → Directory → Add doctor**, or `POST` the same fields to
+`/api/doctors`:
 
-Owner-added records are marked `verified: true`; seeded records are labelled `DEMO RECORD`.
+| Field | Required | Notes |
+| --- | --- | --- |
+| `name`, `specialty`, `qualifications` | yes | Use the clinic's verified credentials |
+| `clinic`, `address`, `city`, `phone` | yes | Full visiting address and a reachable number |
+| `email` | no | Omit it rather than inventing one |
+| `hours`, `fee`, `languages` | no | Enter only details the clinic has confirmed; otherwise use “Call clinic to confirm” / “Ask clinic” |
+| `workingDays`, `slotStart`, `slotEnd`, `slotMinutes` | no | Booking window used by the calendar; defaults to weekdays, 30-minute slots |
+| `teleconsult`, `urgentCare` | no | Default `false` |
+
+The seeded ESIC records show an **ESIC list** badge and link to the source PDF. Owner-added records
+are marked `verified: true` and should come from the clinic directly, not from assumptions.
 
 ## Telegram setup
 
@@ -364,10 +377,20 @@ Each appointment stores:
 - A prefilled Google Calendar event URL (`calendarUrl`) with date, time, timezone, patient, reason,
   reference, and clinic address.
 - A downloadable ICS route (`/api/appointments/:id/ics`) that works in Google Calendar, Apple
-  Calendar, and Outlook.
+  Calendar, and Outlook. The ICS includes a `VALARM` trigger at the selected reminder lead time.
+- `reminderMinutesBefore` and `reminderAt`, both editable from Appointments.
+
+The Calendar tab provides a Google-Calendar-style availability view without OAuth: 7 past days for
+context, today, and the next 28 days, with per-doctor open vs booked counts, selected-day detail, and
+upcoming reminders. Availability is computed from each doctor's demo working days, slot window, and
+confirmed bookings. Past days show history, not bookable slots.
+
+When a requested day or slot is full, `book_appointment` calls `findNextOpenSlot()` and stores the
+requested date/time alongside `autoRebooked: true`. The chat and dashboard both disclose the change,
+and the new booking still gets a reminder.
 
 **Caveat:** full two-way Google Calendar OAuth sync is not implemented because OAuth credentials were
-not provided. The current handoff is intentionally link/download based and requires no credentials.
+not provided. The current handoff is link/download based and requires no credentials.
 
 ## Groq notes
 
@@ -386,10 +409,16 @@ spend per conversation.
 
 ## Data and demo records
 
-- 9 fictional doctors across Mumbai, Delhi, Bengaluru, Chennai, Hyderabad, and Pune.
+- 20 real Chandigarh doctors from the ESIC authorised medical attendants list (pages 1–2), covering
+  general medicine, general practice, paediatrics, gynaecology, orthopaedics, ophthalmology,
+  dermatology, ENT, and general surgery. Source:
+  [ESIC Chandigarh AMA list](https://ropunjab.esic.gov.in/attachments/sstfile/0ac6a4939ae0bc729ff1df95d1c84f42.pdf).
+- ESIC does not publish consultation hours, fees, languages, or official appointment slots in that
+  list. Those values are explicitly labelled as “call clinic to confirm” or demo schedules.
 - 4 fictional orders, including one verified duplicate charge (`#1042`, Riya Sharma, $84).
-- 24 knowledge documents: 15 Doctor and 9 Business.
-- Seed data is created on first run; later changes are stored in `.data/supportsage.json`.
+- 24 knowledge documents: 15 Doctor and 9 Business. Policy tabs are scoped by mode.
+- Seed data is created on first run; later changes are stored in `.data/supportsage.json`. The seed
+  version migrates legacy fictional doctors out of an existing database automatically.
 
 ## Production checklist
 
@@ -398,7 +427,8 @@ This is a demo, not a hardened multi-tenant service. Before real use:
 - Add authentication and authorization to `/dashboard` and all write APIs.
 - Move from local JSON to a transactional database with backups and concurrency control.
 - Encrypt Telegram credentials at rest; do not store them in a plain JSON file.
-- Replace fictional doctor, order, and clinic data with verified records.
+- Verify the ESIC doctor records against the current ESIC list (the seeded list expired 31-05-2024)
+  and replace the fictional order book with real records.
 - Add audit-log immutability, retention rules, and PII redaction.
 - Add per-user rate limiting and abuse protection to `/api/chat`.
 - Implement Google Calendar OAuth if two-way sync is required.

@@ -18,7 +18,7 @@ import {
   formatRelative,
   priorityTone,
 } from "@/components/dashboard/ui";
-import type { Escalation, EscalationType } from "@/lib/types";
+import type { ChatMode, Escalation, EscalationType } from "@/lib/types";
 
 type Filter = "open" | "all" | "resolved";
 
@@ -29,11 +29,13 @@ function typeTone(type: EscalationType) {
 }
 
 export function EscalationsPanel({
+  mode,
   escalations,
   onRefresh,
   notify,
   onOpenConversation,
 }: {
+  mode: ChatMode;
   escalations: Escalation[];
   onRefresh: () => Promise<void>;
   notify: (tone: "success" | "error", message: string) => void;
@@ -42,19 +44,22 @@ export function EscalationsPanel({
   const [filter, setFilter] = useState<Filter>("open");
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const openCount = escalations.filter(
+  const scoped = useMemo(
+    () => escalations.filter((escalation) => escalation.mode === mode),
+    [escalations, mode],
+  );
+
+  const openCount = scoped.filter(
     (escalation) => escalation.status === "open",
   ).length;
 
   const filtered = useMemo(() => {
-    if (filter === "all") return escalations;
+    if (filter === "all") return scoped;
     if (filter === "resolved") {
-      return escalations.filter(
-        (escalation) => escalation.status === "resolved",
-      );
+      return scoped.filter((escalation) => escalation.status === "resolved");
     }
-    return escalations.filter((escalation) => escalation.status !== "resolved");
-  }, [escalations, filter]);
+    return scoped.filter((escalation) => escalation.status !== "resolved");
+  }, [filter, scoped]);
 
   const updateStatus = async (id: string, status: Escalation["status"]) => {
     setBusyId(id);
@@ -84,8 +89,16 @@ export function EscalationsPanel({
 
   return (
     <SectionCard
-      title="Escalation queue"
-      description="Every urgent clinical case, refund request, and security issue opens a tracked case with the full transcript. Telegram delivery is logged below in Integrations."
+      title={
+        mode === "doctor"
+          ? "Doctor care escalation queue"
+          : "Business support case queue"
+      }
+      description={
+        mode === "doctor"
+          ? "Urgent clinical cases opened in Doctor mode, with the full transcript and routing to the selected doctor. Telegram delivery is logged under Integrations."
+          : "Refund requests, priority incidents, and account issues opened in Business mode, with the full transcript and owner routing."
+      }
       action={
         <div className="flex flex-wrap gap-1">
           {(

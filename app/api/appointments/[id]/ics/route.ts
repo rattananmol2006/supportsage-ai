@@ -27,6 +27,7 @@ export async function GET(_request: Request, { params }: Context) {
     durationMinutes: appointment.durationMinutes,
     reason: appointment.reason,
     timezone: appointment.timezone,
+    reminderMinutesBefore: appointment.reminderMinutesBefore,
   });
 
   return new Response(ics, {

@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { createSeedDatabase } from "@/lib/seed";
+import { computeReminderAt } from "@/lib/scheduling";
+import { createSeedDatabase, SEED_VERSION } from "@/lib/seed";
 import type {
   Appointment,
   ChatMode,
@@ -24,24 +25,93 @@ const DATA_FILE = path.join(DATA_DIR, "supportsage.json");
 
 let cached: Database | null = null;
 
-function normalize(parsed: Partial<Database>): Database {
-  const seed = createSeedDatabase();
-  const doctors = (parsed.doctors?.length ? parsed.doctors : seed.doctors).map(
-    (doctor) => ({
-      ...doctor,
-      secondaryPhone: doctor.secondaryPhone || undefined,
-      verified: doctor.verified ?? false,
-      workingDays: doctor.workingDays?.length
-        ? doctor.workingDays
-        : [1, 2, 3, 4, 5],
-      slotMinutes: doctor.slotMinutes || 30,
-    }),
-  );
+const LEGACY_DOCTOR_IDS = new Set([
+  "dr-meera-iyer",
+  "dr-arjun-mehta",
+  "dr-nandita-rao",
+  "dr-kabir-shah",
+  "dr-ananya-nair",
+  "dr-vikram-deshmukh",
+  "dr-rohan-kulkarni",
+  "dr-sana-qureshi",
+  "dr-ishaan-verma",
+]);
+
+function normalizeAppointment(
+  appointment: Appointment,
+  timezone: string,
+): Appointment {
+  const requested = Number(appointment.reminderMinutesBefore);
+  const reminderMinutesBefore =
+    Number.isFinite(requested) && requested >= 5 && requested <= 10080
+      ? Math.round(requested)
+      : 60;
+  let reminderAt =
+    typeof appointment.reminderAt === "string" ? appointment.reminderAt : "";
+
+  if (
+    !reminderAt &&
+    /^\d{4}-\d{2}-\d{2}$/.test(appointment.date) &&
+    /^\d{2}:\d{2}$/.test(appointment.time)
+  ) {
+    reminderAt = computeReminderAt(
+      appointment.date,
+      appointment.time,
+      appointment.timezone || timezone,
+      reminderMinutesBefore,
+    );
+  }
 
   return {
+    ...appointment,
+    reminderMinutesBefore,
+    reminderAt: reminderAt || new Date().toISOString(),
+  };
+}
+
+function normalize(parsed: Partial<Database>): Database {
+  const seed = createSeedDatabase();
+  const timezone = parsed.settings?.timezone ?? seed.settings.timezone;
+  const incomingDoctors = parsed.doctors ?? [];
+  const hasLegacyDoctors = incomingDoctors.some(
+    (doctor) =>
+      LEGACY_DOCTOR_IDS.has(doctor.id) ||
+      /@supportsage\.ai$/i.test(doctor.email ?? ""),
+  );
+  const customDoctors = incomingDoctors.filter(
+    (doctor) => !LEGACY_DOCTOR_IDS.has(doctor.id),
+  );
+  const doctors = (
+    hasLegacyDoctors
+      ? [...seed.doctors, ...customDoctors]
+      : incomingDoctors.length > 0
+        ? incomingDoctors
+        : seed.doctors
+  ).map((doctor) => ({
+    ...doctor,
+    email: doctor.email || undefined,
+    secondaryPhone: doctor.secondaryPhone || undefined,
+    verified: doctor.verified ?? false,
+    workingDays: doctor.workingDays?.length
+      ? doctor.workingDays
+      : [1, 2, 3, 4, 5],
+    slotMinutes: doctor.slotMinutes || 30,
+  }));
+
+  const validDoctorIds = new Set(doctors.map((doctor) => doctor.id));
+  const appointments = (parsed.appointments ?? seed.appointments)
+    .filter(
+      (appointment) =>
+        validDoctorIds.has(appointment.doctorId) ||
+        !LEGACY_DOCTOR_IDS.has(appointment.doctorId),
+    )
+    .map((appointment) => normalizeAppointment(appointment, timezone));
+
+  return {
+    seedVersion: SEED_VERSION,
     conversations: parsed.conversations ?? seed.conversations,
     doctors,
-    appointments: parsed.appointments ?? seed.appointments,
+    appointments,
     escalations: parsed.escalations ?? seed.escalations,
     notifications: parsed.notifications ?? seed.notifications,
     orders: parsed.orders ?? seed.orders,

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import {
+  BellRing,
   CalendarDays,
   CalendarPlus,
   Clock,
@@ -9,6 +10,7 @@ import {
   ExternalLink,
   MapPin,
   Phone,
+  RotateCcw,
   Stethoscope,
 } from "lucide-react";
 
@@ -22,6 +24,11 @@ import {
   notificationTone,
   phoneHref,
 } from "@/components/dashboard/ui";
+import {
+  REMINDER_OPTIONS,
+  formatReminderAt,
+  reminderLabel,
+} from "@/lib/reminders";
 import type { Appointment } from "@/lib/types";
 
 type Filter = "all" | "confirmed" | "completed" | "cancelled";
@@ -80,6 +87,37 @@ export function AppointmentsPanel({
         error instanceof Error
           ? error.message
           : "Could not update the appointment.",
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const updateReminder = async (
+    id: string,
+    reminderMinutesBefore: number,
+  ) => {
+    setBusyId(id);
+    try {
+      const response = await fetch(`/api/appointments/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reminderMinutesBefore }),
+      });
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      if (!response.ok) {
+        throw new Error(data?.error ?? "Could not update the reminder.");
+      }
+      notify("success", `Reminder set ${reminderLabel(reminderMinutesBefore)}.`);
+      await onRefresh();
+    } catch (error) {
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Could not update the reminder.",
       );
     } finally {
       setBusyId(null);
@@ -204,7 +242,25 @@ export function AppointmentsPanel({
                     <p className="line-clamp-1">Reason: {appointment.reason}</p>
                   </div>
 
-                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  {appointment.autoRebooked ? (
+                    <p className="mt-2 flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[9.5px] leading-4 text-amber-900">
+                      <RotateCcw className="mt-0.5 size-3 shrink-0" />
+                      Requested {appointment.requestedDate} at{" "}
+                      {appointment.requestedTime} was full. Sage booked the next
+                      open slot and set the reminder for this booking.
+                    </p>
+                  ) : null}
+
+                  <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[9.5px] font-medium text-emerald-800">
+                    <BellRing className="size-3" />
+                    {reminderLabel(appointment.reminderMinutesBefore)} ·{" "}
+                    {formatReminderAt(
+                      appointment.reminderAt,
+                      appointment.timezone,
+                    )}
+                  </p>
+
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                     <a
                       href={appointment.calendarUrl}
                       target="_blank"
@@ -232,7 +288,40 @@ export function AppointmentsPanel({
                       <ExternalLink className="size-3" />
                       Map
                     </a>
-                    <span className="ml-auto self-center text-[9px] text-subtle">
+                    <label className="ml-auto inline-flex items-center gap-1 text-[9px] text-subtle">
+                      <BellRing className="size-3" />
+                      <span className="sr-only">Reminder timing</span>
+                      <select
+                        value={appointment.reminderMinutesBefore}
+                        disabled={busy}
+                        onChange={(event) =>
+                          void updateReminder(
+                            appointment.id,
+                            Number(event.target.value),
+                          )
+                        }
+                        aria-label={`Reminder timing for ${appointment.reference}`}
+                        className="h-7 rounded-md border border-line bg-white px-1.5 text-[9px] font-medium text-ink outline-none focus:border-brand/40 focus:ring-2 focus:ring-brand/10 disabled:opacity-50"
+                      >
+                        {!REMINDER_OPTIONS.some(
+                          (option) =>
+                            option.minutes ===
+                            appointment.reminderMinutesBefore,
+                        ) ? (
+                          <option value={appointment.reminderMinutesBefore}>
+                            {reminderLabel(
+                              appointment.reminderMinutesBefore,
+                            )}
+                          </option>
+                        ) : null}
+                        {REMINDER_OPTIONS.map((option) => (
+                          <option key={option.minutes} value={option.minutes}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <span className="self-center text-[9px] text-subtle">
                       Booked {new Date(appointment.createdAt).toLocaleString()}
                     </span>
                   </div>

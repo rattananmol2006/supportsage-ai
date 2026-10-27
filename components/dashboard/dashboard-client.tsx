@@ -5,8 +5,11 @@ import Link from "next/link";
 import {
   ArrowUpRight,
   BookOpen,
+  Briefcase,
   CalendarDays,
+  CalendarRange,
   CheckCircle2,
+  FileText,
   LayoutDashboard,
   MessageSquareText,
   MessagesSquare,
@@ -21,6 +24,7 @@ import {
 } from "lucide-react";
 
 import { AppointmentsPanel } from "@/components/dashboard/appointments-panel";
+import { CalendarPanel } from "@/components/dashboard/calendar-panel";
 import { ConversationsPanel } from "@/components/dashboard/conversations-panel";
 import { KnowledgePanel, OrdersPanel } from "@/components/dashboard/data-panels";
 import { DirectoryPanel } from "@/components/dashboard/directory-panel";
@@ -34,13 +38,17 @@ import type {
 } from "@/lib/types";
 
 type Tab =
-  | "conversations"
+  | "doctor-conversations"
   | "appointments"
-  | "escalations"
+  | "calendar"
   | "directory"
+  | "doctor-escalations"
+  | "doctor-knowledge"
+  | "business-conversations"
   | "orders"
-  | "integrations"
-  | "knowledge";
+  | "business-escalations"
+  | "business-knowledge"
+  | "integrations";
 
 type Toast = { tone: "success" | "error"; message: string };
 
@@ -49,7 +57,7 @@ export function DashboardClient() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<Tab>("conversations");
+  const [tab, setTab] = useState<Tab>("doctor-conversations");
   const [selectedId, setSelectedId] = useState<string>();
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [detailId, setDetailId] = useState<string>();
@@ -57,7 +65,25 @@ export function DashboardClient() {
   const [lastUpdated, setLastUpdated] = useState<string>();
   const [toast, setToast] = useState<Toast | null>(null);
 
-  const detailLoading = Boolean(selectedId) && detailId !== selectedId;
+  const conversationMode =
+    tab === "doctor-conversations"
+      ? "doctor"
+      : tab === "business-conversations"
+        ? "business"
+        : null;
+  const effectiveSelectedId = conversationMode
+    ? data?.conversations.some(
+        (conversation) =>
+          conversation.id === selectedId &&
+          conversation.mode === conversationMode,
+      )
+      ? selectedId
+      : data?.conversations.find(
+          (conversation) => conversation.mode === conversationMode,
+        )?.id
+    : selectedId;
+  const detailLoading =
+    Boolean(effectiveSelectedId) && detailId !== effectiveSelectedId;
 
   const notify = useCallback((tone: "success" | "error", message: string) => {
     setToast({ tone, message });
@@ -129,11 +155,12 @@ export function DashboardClient() {
   }, [applyPayload, fetchDashboard]);
 
   useEffect(() => {
-    if (!selectedId) return;
+    if (!effectiveSelectedId) return;
 
     let cancelled = false;
+    const id = effectiveSelectedId;
 
-    void fetch(`/api/conversations/${encodeURIComponent(selectedId)}`, {
+    void fetch(`/api/conversations/${encodeURIComponent(id)}`, {
       cache: "no-store",
     })
       .then(async (response) => {
@@ -145,13 +172,13 @@ export function DashboardClient() {
         }
         if (!cancelled) {
           setDetail(payload);
-          setDetailId(selectedId);
+          setDetailId(id);
         }
       })
       .catch((caught) => {
         if (cancelled) return;
         setDetail(null);
-        setDetailId(selectedId);
+        setDetailId(id);
         notify(
           "error",
           caught instanceof Error
@@ -163,7 +190,7 @@ export function DashboardClient() {
     return () => {
       cancelled = true;
     };
-  }, [notify, refreshVersion, selectedId]);
+  }, [effectiveSelectedId, notify, refreshVersion]);
 
   useEffect(() => {
     if (!toast) return;
@@ -197,54 +224,107 @@ export function DashboardClient() {
   };
 
   const openConversation = (id: string) => {
-    setTab("conversations");
+    const target = data?.conversations.find((item) => item.id === id);
+    setTab(
+      target?.mode === "business"
+        ? "business-conversations"
+        : "doctor-conversations",
+    );
     setSelectedId(id);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const tabs: Array<{
-    id: Tab;
+  const doctorConversations =
+    data?.conversations.filter((item) => item.mode === "doctor").length ?? 0;
+  const businessConversations =
+    data?.conversations.filter((item) => item.mode === "business").length ?? 0;
+  const doctorCases =
+    data?.escalations.filter((item) => item.mode === "doctor").length ?? 0;
+  const businessCases =
+    data?.escalations.filter((item) => item.mode === "business").length ?? 0;
+  const doctorPolicies =
+    data?.knowledge.docs.filter((doc) => doc.mode === "doctor").length ?? 0;
+  const businessPolicies =
+    data?.knowledge.docs.filter((doc) => doc.mode === "business").length ?? 0;
+
+  const tabGroups: Array<{
     label: string;
-    icon: typeof LayoutDashboard;
-    count?: number;
+    tabs: Array<{
+      id: Tab;
+      label: string;
+      icon: typeof LayoutDashboard;
+      count?: number;
+    }>;
   }> = data
     ? [
         {
-          id: "conversations",
-          label: "Conversations",
-          icon: MessagesSquare,
-          count: data.stats.conversations,
+          label: "Doctor care",
+          tabs: [
+            {
+              id: "doctor-conversations",
+              label: "Doctor chats",
+              icon: MessageSquareText,
+              count: doctorConversations,
+            },
+            {
+              id: "appointments",
+              label: "Appointments",
+              icon: CalendarDays,
+              count: data.stats.appointments,
+            },
+            { id: "calendar", label: "Calendar", icon: CalendarRange },
+            {
+              id: "directory",
+              label: "Directory",
+              icon: Stethoscope,
+              count: data.stats.doctors,
+            },
+            {
+              id: "doctor-escalations",
+              label: "Doctor cases",
+              icon: ShieldAlert,
+              count: doctorCases,
+            },
+            {
+              id: "doctor-knowledge",
+              label: "Doctor policies",
+              icon: BookOpen,
+              count: doctorPolicies,
+            },
+          ],
         },
         {
-          id: "appointments",
-          label: "Appointments",
-          icon: CalendarDays,
-          count: data.stats.appointments,
+          label: "Business support",
+          tabs: [
+            {
+              id: "business-conversations",
+              label: "Business chats",
+              icon: Briefcase,
+              count: businessConversations,
+            },
+            {
+              id: "orders",
+              label: "Orders",
+              icon: Receipt,
+              count: data.stats.orders,
+            },
+            {
+              id: "business-escalations",
+              label: "Business cases",
+              icon: ShieldAlert,
+              count: businessCases,
+            },
+            {
+              id: "business-knowledge",
+              label: "Business policies",
+              icon: FileText,
+              count: businessPolicies,
+            },
+          ],
         },
         {
-          id: "escalations",
-          label: "Escalations",
-          icon: ShieldAlert,
-          count: data.stats.escalations,
-        },
-        {
-          id: "directory",
-          label: "Directory",
-          icon: Stethoscope,
-          count: data.stats.doctors,
-        },
-        {
-          id: "orders",
-          label: "Orders",
-          icon: Receipt,
-          count: data.stats.orders,
-        },
-        { id: "integrations", label: "Integrations", icon: Plug },
-        {
-          id: "knowledge",
-          label: "Knowledge",
-          icon: BookOpen,
-          count: data.knowledge.documents,
+          label: "Platform",
+          tabs: [{ id: "integrations", label: "Integrations", icon: Plug }],
         },
       ]
     : [];
@@ -405,48 +485,63 @@ export function DashboardClient() {
               </div>
             ) : null}
 
-            <nav
-              aria-label="Dashboard sections"
-              className="mt-5 flex gap-1 overflow-x-auto border-b border-line pb-px"
-            >
-              {tabs.map((item) => {
-                const Icon = item.icon;
-                const active = tab === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setTab(item.id)}
-                    aria-current={active ? "page" : undefined}
-                    className={`relative inline-flex shrink-0 items-center gap-1.5 rounded-t-lg px-3 py-2.5 text-[10.5px] font-medium transition-colors ${
-                      active
-                        ? "text-brand after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-brand"
-                        : "text-subtle hover:bg-white/60 hover:text-ink"
-                    }`}
-                  >
-                    <Icon className="size-3.5" />
-                    {item.label}
-                    {typeof item.count === "number" ? (
-                      <span
-                        className={`rounded-full px-1.5 py-0.5 text-[8.5px] font-semibold ${
-                          active
-                            ? "bg-brand/[0.08] text-brand"
-                            : "bg-white text-subtle ring-1 ring-line"
-                        }`}
-                      >
-                        {item.count}
-                      </span>
-                    ) : null}
-                  </button>
-                );
-              })}
+            <nav aria-label="Dashboard sections" className="mt-5 space-y-1.5">
+              {tabGroups.map((group) => (
+                <div
+                  key={group.label}
+                  className="flex flex-wrap items-center gap-1 rounded-xl border border-line bg-white p-1.5 shadow-[0_1px_2px_rgba(16,24,40,0.03)]"
+                >
+                  <span className="w-full px-2 pb-0.5 text-[8px] font-semibold uppercase tracking-[0.16em] text-subtle sm:w-28 sm:shrink-0 sm:pb-0">
+                    {group.label}
+                  </span>
+                  <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+                    {group.tabs.map((item) => {
+                      const Icon = item.icon;
+                      const active = tab === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setTab(item.id)}
+                          aria-current={active ? "page" : undefined}
+                          className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-medium transition-colors ${
+                            active
+                              ? "bg-brand text-white shadow-[0_1px_2px_rgba(74,28,58,0.25)]"
+                              : "text-subtle hover:bg-canvas hover:text-ink"
+                          }`}
+                        >
+                          <Icon className="size-3" />
+                          {item.label}
+                          {typeof item.count === "number" ? (
+                            <span
+                              className={`rounded-full px-1.5 py-0.5 text-[8px] font-semibold ${
+                                active
+                                  ? "bg-white/15 text-white"
+                                  : "bg-canvas text-subtle ring-1 ring-line"
+                              }`}
+                            >
+                              {item.count}
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </nav>
 
             <div className="mt-3">
-              {tab === "conversations" ? (
+              {tab === "doctor-conversations" ||
+              tab === "business-conversations" ? (
                 <ConversationsPanel
-                  conversations={data.conversations}
-                  selectedId={selectedId}
+                  mode={tab === "doctor-conversations" ? "doctor" : "business"}
+                  conversations={data.conversations.filter(
+                    (conversation) =>
+                      conversation.mode ===
+                      (tab === "doctor-conversations" ? "doctor" : "business"),
+                  )}
+                  selectedId={effectiveSelectedId}
                   detail={detail}
                   loadingDetail={detailLoading}
                   onSelect={setSelectedId}
@@ -462,9 +557,25 @@ export function DashboardClient() {
                 />
               ) : null}
 
-              {tab === "escalations" ? (
+              {tab === "calendar" ? (
+                <CalendarPanel
+                  calendar={data.calendar}
+                  appointments={data.appointments}
+                  doctors={data.doctors}
+                />
+              ) : null}
+
+              {tab === "doctor-escalations" ||
+              tab === "business-escalations" ? (
                 <EscalationsPanel
-                  escalations={data.escalations}
+                  mode={
+                    tab === "doctor-escalations" ? "doctor" : "business"
+                  }
+                  escalations={data.escalations.filter(
+                    (item) =>
+                      item.mode ===
+                      (tab === "doctor-escalations" ? "doctor" : "business"),
+                  )}
                   onRefresh={() => refresh()}
                   notify={notify}
                   onOpenConversation={openConversation}
@@ -491,8 +602,12 @@ export function DashboardClient() {
                 />
               ) : null}
 
-              {tab === "knowledge" ? (
-                <KnowledgePanel knowledge={data.knowledge} />
+              {tab === "doctor-knowledge" ? (
+                <KnowledgePanel mode="doctor" knowledge={data.knowledge} />
+              ) : null}
+
+              {tab === "business-knowledge" ? (
+                <KnowledgePanel mode="business" knowledge={data.knowledge} />
               ) : null}
             </div>
           </>

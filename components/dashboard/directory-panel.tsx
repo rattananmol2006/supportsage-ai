@@ -4,6 +4,9 @@ import { useMemo, useState, type FormEvent } from "react";
 import {
   BadgeCheck,
   Clock,
+  ExternalLink,
+  FileText,
+  Info,
   Mail,
   MapPin,
   Phone,
@@ -93,9 +96,13 @@ function DoctorCard({
         <div className="min-w-0">
           <p className="flex flex-wrap items-center gap-1.5 text-[12px] font-semibold text-ink">
             {doctor.name}
-            {doctor.verified ? (
+            {doctor.sourceUrl ? (
               <Pill tone="green" icon={BadgeCheck}>
-                Verified
+                ESIC list
+              </Pill>
+            ) : doctor.verified ? (
+              <Pill tone="green" icon={BadgeCheck}>
+                Clinic added
               </Pill>
             ) : (
               <Pill tone="amber">Demo record</Pill>
@@ -149,13 +156,15 @@ function DoctorCard({
               {doctor.secondaryPhone}
             </span>
           ) : null}
-          <a
-            href={`mailto:${doctor.email}`}
-            className="inline-flex items-center gap-1 hover:text-brand hover:underline"
-          >
-            <Mail className="size-3" />
-            {doctor.email}
-          </a>
+          {doctor.email ? (
+            <a
+              href={`mailto:${doctor.email}`}
+              className="inline-flex items-center gap-1 hover:text-brand hover:underline"
+            >
+              <Mail className="size-3" />
+              {doctor.email}
+            </a>
+          ) : null}
         </p>
         <p className="flex items-start gap-1.5">
           <Clock className="mt-0.5 size-3 shrink-0" />
@@ -164,6 +173,19 @@ function DoctorCard({
           </span>
         </p>
       </div>
+
+      {doctor.sourceUrl ? (
+        <a
+          href={doctor.sourceUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 inline-flex items-center gap-1 rounded-md border border-line bg-canvas px-1.5 py-1 text-[8.5px] font-medium text-subtle transition-colors hover:border-brand/25 hover:text-brand"
+        >
+          <FileText className="size-2.5" />
+          {doctor.sourceTitle ?? "ESIC source list"}
+          <ExternalLink className="size-2.5" />
+        </a>
+      ) : null}
 
       <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-line/70 pt-2">
         <span className="rounded-md border border-line bg-canvas px-1.5 py-0.5 text-[8.5px] text-subtle">
@@ -223,7 +245,7 @@ export function DirectoryPanel({
     return doctors.filter((doctor) => {
       if (urgentOnly && !doctor.urgentCare) return false;
       if (!query) return true;
-      return `${doctor.name} ${doctor.specialty} ${doctor.clinic} ${doctor.city} ${doctor.address} ${doctor.languages}`
+      return `${doctor.name} ${doctor.specialty} ${doctor.clinic} ${doctor.city} ${doctor.address} ${doctor.languages} ${doctor.sourceTitle ?? ""}`
         .toLowerCase()
         .includes(query);
     });
@@ -318,8 +340,8 @@ export function DirectoryPanel({
   return (
     <div className="space-y-3">
       <SectionCard
-        title={`Doctor directory (${doctors.length})`}
-        description="This is the same live directory Sage retrieves from and books against. Seeded records are clearly marked as demo data; add real clinic contacts to mark them verified."
+        title={`Chandigarh doctor directory (${doctors.length})`}
+        description="The same live directory Sage searches and books against in Doctor mode. Records marked ESIC list are transcribed from the ESIC authorised medical attendants list for Chandigarh, effective 01-06-2023 to 31-05-2024."
         action={
           <button
             type="button"
@@ -341,7 +363,7 @@ export function DirectoryPanel({
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search by name, specialty, city…"
+              placeholder="Search name, specialty, clinic, sector…"
               aria-label="Search doctors"
               className="h-9 w-full rounded-lg border border-line bg-canvas pl-8 pr-3 text-[11.5px] text-ink outline-none placeholder:text-subtle/80 focus:border-brand/35 focus:ring-2 focus:ring-brand/10"
             />
@@ -362,6 +384,30 @@ export function DirectoryPanel({
           <p className="ml-auto text-[9.5px] text-subtle">
             {filtered.length} of {doctors.length} visible
           </p>
+        </div>
+
+        <div className="mt-3 flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-2 text-[9.5px] leading-4 text-sky-900">
+          <Info className="mt-0.5 size-3 shrink-0" />
+          <div>
+            <p>
+              Source: ESIC AMA list for Chandigarh, effective 01-06-2023 to
+              31-05-2024. Names, qualifications, addresses, phones, and
+              specialties are transcribed as published. The list has no
+              consultation hours, fees, or languages, so those fields say “call
+              clinic to confirm”. Booking windows shown here are demo
+              schedules, not official clinic timings.
+            </p>
+            <a
+              href="https://ropunjab.esic.gov.in/attachments/sstfile/0ac6a4939ae0bc729ff1df95d1c84f42.pdf"
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 inline-flex items-center gap-1 font-semibold text-sky-800 hover:underline"
+            >
+              <FileText className="size-3" />
+              Open the official ESIC Chandigarh list (PDF)
+              <ExternalLink className="size-2.5" />
+            </a>
+          </div>
         </div>
 
         {showForm ? (
@@ -388,7 +434,7 @@ export function DirectoryPanel({
                 <Input
                   value={form.name}
                   onChange={(event) => update("name", event.target.value)}
-                  placeholder="Dr. Asha Menon"
+                  placeholder="Dr. Manu Sharma"
                   required
                   className={fieldClass}
                 />
@@ -419,7 +465,7 @@ export function DirectoryPanel({
                 <Input
                   value={form.clinic}
                   onChange={(event) => update("clinic", event.target.value)}
-                  placeholder="Sage Family Care"
+                  placeholder="Chandigarh Clinic"
                   required
                   className={fieldClass}
                 />
@@ -429,7 +475,7 @@ export function DirectoryPanel({
                 <Input
                   value={form.address}
                   onChange={(event) => update("address", event.target.value)}
-                  placeholder="5 Colaba Causeway, Mumbai 400001"
+                  placeholder="Sector 22, Chandigarh 160022"
                   required
                   className={fieldClass}
                 />
@@ -439,7 +485,7 @@ export function DirectoryPanel({
                 <Input
                   value={form.city}
                   onChange={(event) => update("city", event.target.value)}
-                  placeholder="Mumbai"
+                  placeholder="Chandigarh"
                   required
                   className={fieldClass}
                 />
@@ -449,7 +495,7 @@ export function DirectoryPanel({
                 <Input
                   value={form.phone}
                   onChange={(event) => update("phone", event.target.value)}
-                  placeholder="+91 90000 10010"
+                  placeholder="+91 172 000 0000"
                   required
                   className={fieldClass}
                 />
@@ -461,18 +507,17 @@ export function DirectoryPanel({
                   onChange={(event) =>
                     update("secondaryPhone", event.target.value)
                   }
-                  placeholder="+91 22 4000 2210"
+                  placeholder="+91 172 000 0001"
                   className={fieldClass}
                 />
               </label>
               <label>
-                <span className={labelClass}>Email *</span>
+                <span className={labelClass}>Email (optional)</span>
                 <Input
                   type="email"
                   value={form.email}
                   onChange={(event) => update("email", event.target.value)}
-                  placeholder="asha.menon@clinic.com"
-                  required
+                  placeholder="Leave blank if the clinic has no email"
                   className={fieldClass}
                 />
               </label>

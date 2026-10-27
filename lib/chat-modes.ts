@@ -24,10 +24,10 @@ export const chatModes: ChatModeConfig[] = [
     icon: Stethoscope,
     greeting: "Hi, I am Sage. How can I assist you?",
     suggestions: [
-      "I've had typhoid fever for 3 days",
-      "Find a cardiologist in Mumbai",
-      "Book Dr. Meera Iyer",
-      "Show Dr. Vikram Deshmukh's schedule",
+      "I've had a fever for 3 days in Sector 20",
+      "Find a dermatologist in Sector 32",
+      "My child has a fever; paediatrician in Sector 37",
+      "Book an eye appointment in Sector 36",
     ],
   },
   {

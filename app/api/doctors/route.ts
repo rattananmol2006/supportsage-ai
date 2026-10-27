@@ -51,7 +51,7 @@ export async function GET(request: Request) {
     }
     if (q) {
       const haystack =
-        `${doctor.name} ${doctor.specialty} ${doctor.clinic} ${doctor.city} ${doctor.address} ${doctor.languages} ${doctor.email} ${doctor.phone}`.toLowerCase();
+        `${doctor.name} ${doctor.specialty} ${doctor.clinic} ${doctor.city} ${doctor.address} ${doctor.languages} ${doctor.email ?? ""} ${doctor.phone} ${doctor.sourceTitle ?? ""}`.toLowerCase();
       if (!haystack.includes(q)) return false;
     }
     return true;
@@ -92,20 +92,19 @@ export async function POST(request: Request) {
     !address ||
     !city ||
     !phone ||
-    !email ||
     !hours ||
     !fee
   ) {
     return NextResponse.json(
       {
         error:
-          "Name, specialty, clinic, address, city, phone, email, hours, and fee are required.",
+          "Name, specialty, clinic, address, city, phone, hours, and fee are required.",
       },
       { status: 400 },
     );
   }
 
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return NextResponse.json(
       { error: "Enter a valid email address." },
       { status: 400 },
@@ -158,7 +157,7 @@ export async function POST(request: Request) {
     city,
     phone,
     secondaryPhone: text(body.secondaryPhone, 40) || undefined,
-    email,
+    email: email || undefined,
     hours,
     fee,
     languages: text(body.languages, 160) || "English",

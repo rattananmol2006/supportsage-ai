@@ -113,7 +113,7 @@ export const knowledgeDocs: KnowledgeDoc[] = [
       "email",
     ],
     content:
-      "The live directory contains each doctor's specialty, qualifications, clinic, full address, city, phone, secondary phone, email, consultation fee, languages, teleconsult availability, and weekly hours. Always retrieve details with the doctor search tool instead of relying on memory. When a patient asks for the nearest doctor, ask for their city or area if it is unknown, then search by city and specialty. Share the full contact card, a map link, and at least two available slots. Urgent-care doctors Dr. Vikram Deshmukh in Pune and Dr. Ishaan Verma in Mumbai cover same-day general medicine. Seeded demo records are clearly marked in the dashboard; owners can add verified contacts at any time.",
+      "The live directory is a Chandigarh-only directory transcribed from the ESIC authorised medical attendants list (01-06-2023 to 31-05-2024). It contains each doctor's specialty, qualifications, clinic, full address, phone, source record, and online booking window. The ESIC list does not publish consultation hours, fees, emails, or languages, so never invent those; tell the patient to call the clinic to confirm. When a patient asks for the nearest doctor, ask for their area or sector, then search by specialty and match the Chandigarh address. If the patient is outside Chandigarh, say the directory currently covers Chandigarh only. Share the full contact card, a map link, and at least two available slots. For same-day general medicine, search for urgent-care general physicians such as Dr. Taranvir Kaur (Sector 41-B) or Dr. Anil Kapoor (Sector 29-D). Choose the doctor by the patient's actual problem and location; do not reuse one doctor for every disease.",
   },
   {
     id: "kb-labs",
@@ -151,7 +151,7 @@ export const knowledgeDocs: KnowledgeDoc[] = [
       "consultation fee",
     ],
     content:
-      "Consultation fees are listed in each doctor's directory profile and are collected at the clinic or before a teleconsultation. The clinic can provide a payment receipt for insurance reimbursement, but direct cashless insurance is not available for chat-booked appointments. Ask patients to confirm their insurer's reimbursement requirements. Teleconsultation slots follow the same booking flow and use a secure video link sent after confirmation. For billing questions about a consultation, create a support escalation with the appointment reference.",
+      "The ESIC authorised medical attendants list does not publish consultation fees. Tell patients the fee is not listed in the directory and they must call the clinic to confirm before visiting. Do not quote a fee or promise cashless insurance. If a patient asks about ESIC eligibility, reimbursement, or a receipt, explain that the clinic must confirm it and create a support escalation with the appointment reference. Teleconsultation is not confirmed for these records; do not offer a video visit unless the doctor record explicitly says teleconsult is available.",
   },
   {
     id: "kb-clinic-hours",
@@ -170,7 +170,7 @@ export const knowledgeDocs: KnowledgeDoc[] = [
       "map",
     ],
     content:
-      "Sage Health Collective operates specialty clinics in Bengaluru, Mumbai, Hyderabad, New Delhi, Chennai, and Pune. Clinic hours vary by doctor and are shown in the directory. Sage Urgent Care in Pune is open daily from 8:00 AM to 10:00 PM; Sage Family Care in Mumbai offers same-day general medicine Monday to Saturday, 8:00 AM to 8:00 PM. For life-threatening emergencies, do not travel to a routine clinic — call 112 or go to the nearest hospital emergency department. The clinic phone number is +91 90000 10000.",
+      "The directory currently covers Chandigarh only. Doctors practise across sectors and localities including Sector 7-C, 15-C, 20-D, 27-A, 27-D, 29-D, 30-C, 32-D, 35-C, 36-D, 37-A, 37-B, 37-C, 41-B, 41-D, 44-A, Burail, and Manimajra. The ESIC AMA list does not publish clinic hours, so patients must call the clinic to confirm timings. The online booking window in each record is a demo schedule, not an official timetable. For life-threatening emergencies, do not travel to a routine clinic — call 112 or go to the nearest hospital emergency department. The platform support phone is +91 172 400 1000.",
   },
   {
     id: "kb-cold-flu",
@@ -242,7 +242,7 @@ export const knowledgeDocs: KnowledgeDoc[] = [
       "vomiting",
     ],
     content:
-      "For a child with fever, ask for age, temperature, duration, fluid intake, urine output, rash, breathing difficulty, and alertness. A fever in an infant under 3 months is an emergency. Seek urgent care for a child who is difficult to wake, has trouble breathing, a non-blanching rash, persistent vomiting, dehydration, a seizure, or a fever lasting more than three days. Avoid aspirin. Do not give medication doses without the child's weight and a clinician's guidance. Offer a pediatric appointment with Dr. Nandita Rao or urgent care when red flags are present.",
+      "For a child with fever, ask for age, temperature, duration, fluid intake, urine output, rash, breathing difficulty, and alertness. A fever in an infant under 3 months is an emergency. Seek urgent care for a child who is difficult to wake, has trouble breathing, a non-blanching rash, persistent vomiting, dehydration, a seizure, or a fever lasting more than three days. Avoid aspirin. Do not give medication doses without the child's weight and a clinician's guidance. Offer a paediatric appointment with a Chandigarh paediatrician from the directory, such as Dr. Manu Sharma at Chikitsa Clinic in Sector 37-B or Dr. Anil Kumar at Divya Clinic in Burail, and use urgent care when red flags are present.",
   },
   {
     id: "kb-skin",
@@ -260,7 +260,7 @@ export const knowledgeDocs: KnowledgeDoc[] = [
       "swelling",
     ],
     content:
-      "Ask about rash location, duration, itching, new medications, foods, and breathing or facial swelling. A rash with swelling of the lips or tongue, wheezing, or difficulty breathing is an emergency — call 112 or use emergency services immediately. A non-blanching purple rash with fever is also urgent. Most localized rashes can be reviewed in a dermatology appointment with Dr. Ananya Nair. Do not recommend starting prescription steroids or antibiotics from chat.",
+      "Ask about rash location, duration, itching, new medications, foods, and breathing or facial swelling. A rash with swelling of the lips or tongue, wheezing, or difficulty breathing is an emergency — call 112 or use emergency services immediately. A non-blanching purple rash with fever is also urgent. Most localized rashes can be reviewed in a dermatology appointment with Dr. Sukhdeep Kaur at SCO-376, Sector 32-D, Chandigarh. Do not recommend starting prescription steroids or antibiotics from chat.",
   },
   {
     id: "kb-orthopaedics",
@@ -279,7 +279,7 @@ export const knowledgeDocs: KnowledgeDoc[] = [
       "swelling",
     ],
     content:
-      "For an injury, ask about the mechanism, ability to bear weight, deformity, numbness, and swelling. Advise rest, ice, compression, and elevation for a minor sprain while arranging review. Seek urgent care for an obvious deformity, inability to move or bear weight, severe pain, numbness, or a suspected fracture. Back pain with loss of bladder or bowel control, fever, or progressive weakness is urgent. Offer an orthopaedics appointment with Dr. Kabir Shah when the injury is stable.",
+      "For an injury, ask about the mechanism, ability to bear weight, deformity, numbness, and swelling. Advise rest, ice, compression, and elevation for a minor sprain while arranging review. Seek urgent care for an obvious deformity, inability to move or bear weight, severe pain, numbness, or a suspected fracture. Back pain with loss of bladder or bowel control, fever, or progressive weakness is urgent. Offer an orthopaedics appointment with Dr. Paramjit Singh Kapoor at #62, Sector 44-A, or Dr. Aseem Goyal at Prime Health Care, Sector 27-D, when the injury is stable.",
   },
   {
     id: "kb-vaccination",
