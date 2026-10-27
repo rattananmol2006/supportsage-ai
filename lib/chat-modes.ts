@@ -20,8 +20,7 @@ export const chatModes: ChatModeConfig[] = [
     description:
       "Explain clinical information, summarize symptoms, and draft patient-friendly follow-ups.",
     icon: Stethoscope,
-    greeting:
-      "Hi, I'm Sage in Doctor mode. I can help explain clinical information, summarize symptoms, and draft patient-friendly follow-ups. I don't replace clinical judgment — urgent symptoms should go to a licensed clinician or emergency services.",
+    greeting: "Hi, I am Sage. How can I assist you?",
     suggestions: [
       "Explain lab results in plain language",
       "Draft post-visit instructions",
@@ -35,8 +34,7 @@ export const chatModes: ChatModeConfig[] = [
     description:
       "Draft customer replies, resolve escalations, and turn support metrics into decisions.",
     icon: Briefcase,
-    greeting:
-      "Hi, I'm Sage in Business Owner mode. I can help draft customer replies, handle refunds and escalations, and turn support metrics into decisions. What are you working on?",
+    greeting: "Hi, I am Sage. How can I assist you?",
     suggestions: [
       "Draft a refund response",
       "Summarize support metrics",
