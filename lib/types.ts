@@ -94,6 +94,10 @@ export type Appointment = {
   requestedDate?: string;
   requestedTime?: string;
   autoRebooked?: boolean;
+  googleEventId?: string;
+  googleEventLink?: string;
+  googleSyncedAt?: string;
+  googleSyncError?: string;
   notificationStatus: "sent" | "queued" | "failed";
   createdAt: string;
 };
@@ -221,6 +225,15 @@ export type Settings = {
   timezone: string;
   telegramBotToken?: string;
   telegramChatId?: string;
+  googleClientId?: string;
+  googleClientSecret?: string;
+  googleCalendarId?: string;
+  googleAccessToken?: string;
+  googleRefreshToken?: string;
+  googleTokenExpiresAt?: string;
+  googleScope?: string;
+  googleConnectedEmail?: string;
+  googleConnectedAt?: string;
 };
 
 export type PublicSettings = {
@@ -230,6 +243,14 @@ export type PublicSettings = {
   telegramConnected: boolean;
   telegramChatIdMasked: string;
   telegramSource: "dashboard" | "environment" | "none";
+  googleClientId: string;
+  googleClientConfigured: boolean;
+  googleClientSource: "dashboard" | "environment" | "none";
+  googleConnected: boolean;
+  googleEmail?: string;
+  googleRedirectUri: string;
+  googleCalendarId: string;
+  googleConnectedAt?: string;
 };
 
 export type Database = {
@@ -303,7 +324,7 @@ export type DashboardPayload = {
   integrations: {
     groq: boolean;
     telegram: boolean;
-    googleCalendar: "event-links-and-ics";
+    googleCalendar: "oauth" | "event-links-and-ics";
     database: "local-json";
   };
 };

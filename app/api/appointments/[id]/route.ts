@@ -1,10 +1,22 @@
 import { NextResponse } from "next/server";
 
 import { findAppointment, updateAppointment } from "@/lib/db";
+import {
+  createEventForAppointment,
+  deleteGoogleCalendarEvent,
+  isGoogleCalendarConnected,
+  updateGoogleCalendarReminder,
+} from "@/lib/google-calendar";
 import { computeReminderAt } from "@/lib/scheduling";
 import type { Appointment } from "@/lib/types";
 
 type Context = { params: Promise<{ id: string }> };
+
+function errorMessage(error: unknown) {
+  return error instanceof Error
+    ? error.message
+    : "Google Calendar sync failed.";
+}
 
 export async function PATCH(request: Request, { params }: Context) {
   const { id } = await params;
@@ -22,6 +34,7 @@ export async function PATCH(request: Request, { params }: Context) {
   } | null;
 
   const patch: Partial<Appointment> = {};
+  let googleWarning: string | undefined;
 
   if (body?.status !== undefined) {
     const status = body.status;
@@ -65,6 +78,66 @@ export async function PATCH(request: Request, { params }: Context) {
     );
   }
 
+  if (patch.status === "cancelled" && appointment.googleEventId) {
+    try {
+      await deleteGoogleCalendarEvent(appointment.googleEventId);
+      patch.googleEventId = undefined;
+      patch.googleEventLink = undefined;
+      patch.googleSyncedAt = undefined;
+      patch.googleSyncError = undefined;
+    } catch (error) {
+      googleWarning = errorMessage(error);
+      patch.googleSyncError = googleWarning;
+      console.error("[google-calendar] cancellation sync failed", error);
+    }
+  }
+
+  if (
+    patch.status === "confirmed" &&
+    !appointment.googleEventId &&
+    isGoogleCalendarConnected()
+  ) {
+    try {
+      const event = await createEventForAppointment({
+        ...appointment,
+        status: "confirmed",
+      });
+      patch.googleEventId = event.id;
+      patch.googleEventLink = event.htmlLink;
+      patch.googleSyncedAt = new Date().toISOString();
+      patch.googleSyncError = undefined;
+    } catch (error) {
+      googleWarning = errorMessage(error);
+      patch.googleSyncError = googleWarning;
+      console.error("[google-calendar] resync failed", error);
+    }
+  }
+
+  const googleEventId = patch.googleEventId ?? appointment.googleEventId;
+
+  if (
+    patch.reminderMinutesBefore !== undefined &&
+    patch.status !== "cancelled" &&
+    googleEventId
+  ) {
+    try {
+      await updateGoogleCalendarReminder(
+        googleEventId,
+        patch.reminderMinutesBefore,
+      );
+      patch.googleSyncError = undefined;
+    } catch (error) {
+      googleWarning = errorMessage(error);
+      patch.googleSyncError = googleWarning;
+      console.error("[google-calendar] reminder sync failed", error);
+    }
+  }
+
   const updated = updateAppointment(id, patch);
-  return NextResponse.json({ appointment: updated });
+  const response = NextResponse.json({
+    appointment: updated,
+    googleWarning,
+  });
+  response.headers.set("Cache-Control", "no-store");
+  return response;
 }

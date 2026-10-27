@@ -12,6 +12,26 @@ export const metadata: Metadata = {
   },
 };
 
-export default function DashboardPage() {
-  return <DashboardClient />;
+export const instant = false;
+
+function first(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const params = await searchParams;
+  const google = first(params.google);
+  const googleStatus =
+    google === "connected" ? "connected" : google === "error" ? "error" : undefined;
+
+  return (
+    <DashboardClient
+      googleStatus={googleStatus}
+      googleReason={first(params.reason)}
+    />
+  );
 }

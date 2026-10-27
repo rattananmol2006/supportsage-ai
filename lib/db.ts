@@ -456,6 +456,16 @@ export function publicSettings(): PublicSettings {
   const settings = getSettings();
   const token = settings.telegramBotToken || process.env.TELEGRAM_BOT_TOKEN;
   const chatId = settings.telegramChatId || process.env.TELEGRAM_CHAT_ID;
+  const googleClientId =
+    settings.googleClientId || process.env.GOOGLE_CLIENT_ID?.trim() || "";
+  const googleClientSecret =
+    settings.googleClientSecret ||
+    process.env.GOOGLE_CLIENT_SECRET?.trim() ||
+    "";
+  const appUrl = process.env.APP_URL?.trim() || "http://localhost:3000";
+  const googleRedirectUri =
+    process.env.GOOGLE_REDIRECT_URI?.trim() ||
+    `${appUrl.replace(/\/$/, "")}/api/integrations/google/callback`;
 
   return {
     clinicName: settings.clinicName,
@@ -468,6 +478,20 @@ export function publicSettings(): PublicSettings {
       : token
         ? "environment"
         : "none",
+    googleClientId,
+    googleClientConfigured: Boolean(googleClientId && googleClientSecret),
+    googleClientSource: settings.googleClientId
+      ? "dashboard"
+      : googleClientId
+        ? "environment"
+        : "none",
+    googleConnected: Boolean(
+      googleClientId && googleClientSecret && settings.googleRefreshToken,
+    ),
+    googleEmail: settings.googleConnectedEmail,
+    googleRedirectUri,
+    googleCalendarId: settings.googleCalendarId || "primary",
+    googleConnectedAt: settings.googleConnectedAt,
   };
 }
 

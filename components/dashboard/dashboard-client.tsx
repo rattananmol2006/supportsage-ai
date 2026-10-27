@@ -52,12 +52,20 @@ type Tab =
 
 type Toast = { tone: "success" | "error"; message: string };
 
-export function DashboardClient() {
+export function DashboardClient({
+  googleStatus,
+  googleReason,
+}: {
+  googleStatus?: "connected" | "error";
+  googleReason?: string;
+} = {}) {
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<Tab>("doctor-conversations");
+  const [tab, setTab] = useState<Tab>(
+    googleStatus ? "integrations" : "doctor-conversations",
+  );
   const [selectedId, setSelectedId] = useState<string>();
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [detailId, setDetailId] = useState<string>();
@@ -597,6 +605,8 @@ export function DashboardClient() {
                   settings={data.settings}
                   integrations={data.integrations}
                   notifications={data.notifications}
+                  googleStatus={googleStatus}
+                  googleReason={googleReason}
                   onRefresh={() => refresh()}
                   notify={notify}
                 />

@@ -14,6 +14,10 @@ import {
   publicDoctor,
   updateAppointment,
 } from "@/lib/db";
+import {
+  createEventForAppointment,
+  isGoogleCalendarConnected,
+} from "@/lib/google-calendar";
 import { mergeKeyInfo } from "@/lib/insights";
 import { buildRagContext, type RetrievedChunk } from "@/lib/rag";
 import { DEFAULT_REMINDER_MINUTES, reminderLabel } from "@/lib/reminders";
@@ -779,6 +783,26 @@ async function bookAppointment(
     icsUrl: `/api/appointments/${appointment.id}/ics`,
   }) ?? appointment;
 
+  if (isGoogleCalendarConnected()) {
+    try {
+      const event = await createEventForAppointment(appointment);
+      appointment =
+        updateAppointment(appointment.id, {
+          googleEventId: event.id,
+          googleEventLink: event.htmlLink,
+          googleSyncedAt: new Date().toISOString(),
+          googleSyncError: undefined,
+        }) ?? appointment;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Google Calendar sync failed.";
+      console.error("[google-calendar] appointment sync failed", error);
+      appointment =
+        updateAppointment(appointment.id, { googleSyncError: message }) ??
+        appointment;
+    }
+  }
+
   const message = [
     `🩺 New appointment ${appointment.reference}`,
     `Doctor: ${doctor.name} (${doctor.specialty})`,
@@ -825,6 +849,10 @@ async function bookAppointment(
     intent: "appointment_booking",
   });
 
+  const googleNote = appointment.googleEventLink
+    ? "The appointment is also on the clinic's Google Calendar."
+    : "";
+
   return {
     ok: true,
     appointment,
@@ -843,18 +871,19 @@ async function bookAppointment(
     calendar: {
       google: appointment.calendarUrl,
       ics: appointment.icsUrl,
+      event: appointment.googleEventLink,
+      synced: Boolean(appointment.googleEventLink),
+      error: appointment.googleSyncError,
     },
-    instruction: autoRebooked
-      ? `The requested slot on ${requestedDate} at ${requestedTime} was full. Booked the next open slot on ${date} at ${time}. Tell the patient clearly that the requested day/slot was unavailable, give the new date and time, and confirm the reminder for ${reminderLabel(reminderMinutesBefore)} before. ${
-          notification.status === "sent"
-            ? "The clinic has been notified."
-            : "The Telegram alert is queued because the bot is not configured; do not claim it was sent."
-        }`
-      : `Confirm the booking, give the reference and exact date/time, and mention the reminder for ${reminderLabel(reminderMinutesBefore)} before. ${
-          notification.status === "sent"
-            ? "Tell the patient the clinic has been notified."
-            : "Say the Telegram alert is queued because the bot is not configured; do not claim it was sent."
-        }`,
+    instruction: `${
+      autoRebooked
+        ? `The requested slot on ${requestedDate} at ${requestedTime} was full. Booked the next open slot on ${date} at ${time}. Tell the patient clearly that the requested day/slot was unavailable, give the new date and time, and confirm the reminder for ${reminderLabel(reminderMinutesBefore)} before. `
+        : `Confirm the booking, give the reference and exact date/time, and mention the reminder for ${reminderLabel(reminderMinutesBefore)} before. `
+    }${
+      notification.status === "sent"
+        ? "The clinic has been notified."
+        : "The Telegram alert is queued because the bot is not configured; do not claim it was sent."
+    }${googleNote ? ` ${googleNote}` : ""}`,
   };
 }
 

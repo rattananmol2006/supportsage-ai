@@ -6,8 +6,12 @@ import {
   Bot,
   CalendarPlus,
   CheckCircle2,
+  Copy,
   Database,
+  ExternalLink,
   KeyRound,
+  Link2,
+  RefreshCw,
   Send,
   ShieldCheck,
   Sparkles,
@@ -34,6 +38,26 @@ const fieldClass =
   "h-9 rounded-lg border-line bg-white text-[11.5px] text-ink placeholder:text-subtle/70 focus-visible:border-brand/40 focus-visible:ring-brand/10";
 const labelClass =
   "mb-1 block text-[9px] font-semibold uppercase tracking-[0.12em] text-subtle";
+
+function googleReasonLabel(reason?: string) {
+  const labels: Record<string, string> = {
+    not_configured:
+      "Add the Google client ID and client secret, then try again.",
+    cancelled: "The Google authorisation was cancelled.",
+    google_denied: "Google denied the authorisation request.",
+    state_mismatch:
+      "The security state did not match. Start the connection again.",
+    missing_code: "Google did not return an authorisation code.",
+    no_refresh_token:
+      "Google did not return a refresh token. Remove the app from your Google account permissions and reconnect.",
+    token_exchange_failed:
+      "Google rejected the authorisation code. Check the client ID, secret, and redirect URI.",
+    reauth_required:
+      "The saved Google token is no longer valid. Reconnect the calendar.",
+    start_failed: "Could not start the Google connection.",
+  };
+  return reason ? (labels[reason] ?? "Google Calendar connection failed.") : "Google Calendar connection failed.";
+}
 
 function ConnectionTile({
   icon: Icon,
@@ -71,12 +95,16 @@ export function IntegrationsPanel({
   settings,
   integrations,
   notifications,
+  googleStatus,
+  googleReason,
   onRefresh,
   notify,
 }: {
   settings: PublicSettings;
   integrations: Integrations;
   notifications: Notification[];
+  googleStatus?: "connected" | "error";
+  googleReason?: string;
   onRefresh: () => Promise<void>;
   notify: (tone: "success" | "error", message: string) => void;
 }) {
@@ -85,7 +113,16 @@ export function IntegrationsPanel({
   const [timezone, setTimezone] = useState(settings.timezone);
   const [botToken, setBotToken] = useState("");
   const [chatId, setChatId] = useState("");
+  const [googleClientId, setGoogleClientId] = useState(settings.googleClientId);
+  const [googleClientSecret, setGoogleClientSecret] = useState("");
+  const [googleCalendarId, setGoogleCalendarId] = useState(
+    settings.googleCalendarId,
+  );
   const [saving, setSaving] = useState(false);
+  const [savingGoogle, setSavingGoogle] = useState(false);
+  const [disconnectingGoogle, setDisconnectingGoogle] = useState(false);
+  const [testingGoogle, setTestingGoogle] = useState(false);
+  const [googleTestLink, setGoogleTestLink] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{
     tone: "success" | "error";
@@ -176,6 +213,117 @@ export function IntegrationsPanel({
     }
   };
 
+  const saveGoogle = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (savingGoogle) return;
+    setSavingGoogle(true);
+    try {
+      const payload: Record<string, string> = {
+        googleClientId: googleClientId.trim(),
+        googleCalendarId: googleCalendarId.trim() || "primary",
+      };
+      if (googleClientSecret.trim()) {
+        payload.googleClientSecret = googleClientSecret.trim();
+      }
+
+      const response = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        googleConfigured?: boolean;
+      } | null;
+      if (!response.ok) {
+        throw new Error(data?.error ?? "Could not save Google settings.");
+      }
+      setGoogleClientSecret("");
+      notify(
+        "success",
+        data?.googleConfigured
+          ? "Google OAuth details saved. Connect the calendar to finish."
+          : "Google details saved, but OAuth is not fully configured yet.",
+      );
+      await onRefresh();
+    } catch (error) {
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Could not save Google settings.",
+      );
+    } finally {
+      setSavingGoogle(false);
+    }
+  };
+
+  const disconnectGoogle = async () => {
+    if (disconnectingGoogle) return;
+    setDisconnectingGoogle(true);
+    setGoogleTestLink(null);
+    try {
+      const response = await fetch("/api/integrations/google/disconnect", {
+        method: "POST",
+      });
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      if (!response.ok) {
+        throw new Error(data?.error ?? "Could not disconnect Google Calendar.");
+      }
+      notify("success", "Google Calendar disconnected.");
+      await onRefresh();
+    } catch (error) {
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Could not disconnect Google Calendar.",
+      );
+    } finally {
+      setDisconnectingGoogle(false);
+    }
+  };
+
+  const testGoogle = async () => {
+    if (testingGoogle) return;
+    setTestingGoogle(true);
+    setGoogleTestLink(null);
+    try {
+      const response = await fetch("/api/integrations/google/test", {
+        method: "POST",
+      });
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        event?: { link?: string };
+      } | null;
+      if (!response.ok) {
+        throw new Error(data?.error ?? "Google Calendar did not accept the test.");
+      }
+      setGoogleTestLink(data?.event?.link ?? null);
+      notify("success", "Test event created in Google Calendar.");
+    } catch (error) {
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Google Calendar did not accept the test.",
+      );
+    } finally {
+      setTestingGoogle(false);
+    }
+  };
+
+  const copyRedirectUri = async () => {
+    try {
+      await navigator.clipboard.writeText(settings.googleRedirectUri);
+      notify("success", "Redirect URI copied.");
+    } catch {
+      notify("error", "Could not copy the redirect URI. Select it manually.");
+    }
+  };
+
   return (
     <div className="space-y-3">
       <SectionCard
@@ -204,10 +352,28 @@ export function IntegrationsPanel({
           <ConnectionTile
             icon={CalendarPlus}
             label="Google Calendar"
-            value="Event link + ICS"
-            detail="Prefilled event links and downloadable .ics files work without OAuth."
-            connected
-            badge="Link + ICS"
+            value={
+              settings.googleConnected
+                ? `Syncing${settings.googleEmail ? ` as ${settings.googleEmail}` : ""}`
+                : settings.googleClientConfigured
+                  ? "OAuth ready"
+                  : "Event link + ICS"
+            }
+            detail={
+              settings.googleConnected
+                ? "Bookings, cancellations, and reminder changes sync to Google Calendar."
+                : settings.googleClientConfigured
+                  ? "Credentials saved. Connect the calendar to create events."
+                  : "Prefilled event links and .ics files work without OAuth."
+            }
+            connected={settings.googleConnected}
+            badge={
+              settings.googleConnected
+                ? "Connected"
+                : settings.googleClientConfigured
+                  ? "Connect"
+                  : "Link + ICS"
+            }
           />
           <ConnectionTile
             icon={Database}
@@ -372,6 +538,206 @@ export function IntegrationsPanel({
           </div>
         </SectionCard>
       </div>
+
+      <SectionCard
+        title="Google Calendar OAuth"
+        description="Create real events from bookings. Credentials and tokens stay on the server; the browser only sees connection status."
+        action={
+          <Pill tone={settings.googleConnected ? "green" : "amber"}>
+            {settings.googleConnected
+              ? "Connected"
+              : settings.googleClientConfigured
+                ? "Ready to connect"
+                : "Not configured"}
+          </Pill>
+        }
+      >
+        {googleStatus ? (
+          <p
+            className={`mb-3 flex items-start gap-1.5 rounded-md border px-2.5 py-2 text-[10px] leading-4 ${
+              googleStatus === "connected"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-red-200 bg-red-50 text-red-700"
+            }`}
+          >
+            {googleStatus === "connected" ? (
+              <CheckCircle2 className="mt-0.5 size-3 shrink-0" />
+            ) : (
+              <XCircle className="mt-0.5 size-3 shrink-0" />
+            )}
+            {googleStatus === "connected"
+              ? "Google Calendar connected. New bookings will create events automatically."
+              : googleReasonLabel(googleReason)}
+          </p>
+        ) : null}
+
+        {settings.googleConnected ? (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 p-2.5">
+            <div className="min-w-0">
+              <p className="truncate text-[10.5px] font-semibold text-emerald-900">
+                {settings.googleEmail ?? "Google account connected"}
+              </p>
+              <p className="mt-0.5 text-[9px] text-emerald-900/70">
+                Calendar: {settings.googleCalendarId}
+                {settings.googleConnectedAt
+                  ? ` · connected ${formatRelative(settings.googleConnectedAt)}`
+                  : ""}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <a
+                href="/api/integrations/google/start"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-[10px] font-medium text-ink transition-colors hover:bg-canvas"
+              >
+                <RefreshCw className="size-3" />
+                Reconnect
+              </a>
+              <button
+                type="button"
+                onClick={() => void testGoogle()}
+                disabled={testingGoogle}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 py-1.5 text-[10px] font-medium text-ink transition-colors hover:bg-canvas disabled:opacity-50"
+              >
+                <CalendarPlus className="size-3" />
+                {testingGoogle ? "Testing…" : "Test event"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void disconnectGoogle()}
+                disabled={disconnectingGoogle}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-[10px] font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
+              >
+                <XCircle className="size-3" />
+                {disconnectingGoogle ? "Disconnecting…" : "Disconnect"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {googleTestLink ? (
+          <p className="mb-3 text-[9.5px] text-subtle">
+            Test event created.{" "}
+            <a
+              href={googleTestLink}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 font-medium text-brand hover:underline"
+            >
+              Open in Google Calendar
+              <ExternalLink className="size-2.5" />
+            </a>
+          </p>
+        ) : null}
+
+        <div className="grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+          <form onSubmit={(event) => void saveGoogle(event)}>
+            <div className="grid gap-2.5 sm:grid-cols-2">
+              <label className="sm:col-span-2">
+                <span className={labelClass}>OAuth client ID</span>
+                <Input
+                  value={googleClientId}
+                  onChange={(event) => setGoogleClientId(event.target.value)}
+                  placeholder="1234567890-abc123.apps.googleusercontent.com"
+                  autoComplete="off"
+                  className={fieldClass}
+                />
+              </label>
+              <label className="sm:col-span-2">
+                <span className={labelClass}>OAuth client secret</span>
+                <Input
+                  type="password"
+                  value={googleClientSecret}
+                  onChange={(event) => setGoogleClientSecret(event.target.value)}
+                  placeholder={
+                    settings.googleClientConfigured
+                      ? "Saved — enter a new secret to replace it"
+                      : "GOCSPX-…"
+                  }
+                  autoComplete="new-password"
+                  className={fieldClass}
+                />
+              </label>
+              <label className="sm:col-span-2">
+                <span className={labelClass}>Calendar ID</span>
+                <Input
+                  value={googleCalendarId}
+                  onChange={(event) => setGoogleCalendarId(event.target.value)}
+                  placeholder="primary"
+                  className={fieldClass}
+                />
+              </label>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="submit"
+                disabled={savingGoogle}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[10px] font-medium text-white transition-colors hover:bg-brand-deep disabled:opacity-50"
+              >
+                <KeyRound className="size-3" />
+                {savingGoogle ? "Saving…" : "Save Google details"}
+              </button>
+              <a
+                href="/api/integrations/google/start"
+                aria-disabled={!settings.googleClientConfigured}
+                onClick={(event) => {
+                  if (!settings.googleClientConfigured) event.preventDefault();
+                }}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[10px] font-medium transition-colors ${
+                  settings.googleClientConfigured
+                    ? "border-line bg-white text-ink hover:bg-canvas"
+                    : "cursor-not-allowed border-line bg-canvas text-subtle"
+                }`}
+              >
+                <Link2 className="size-3" />
+                {settings.googleConnected ? "Connect a different account" : "Connect Google Calendar"}
+              </a>
+              <span className="text-[9px] text-subtle">
+                Credentials source: {settings.googleClientSource}
+              </span>
+            </div>
+          </form>
+
+          <div className="rounded-lg border border-line bg-canvas/60 p-3">
+            <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-subtle">
+              Authorised redirect URI
+            </p>
+            <div className="mt-1.5 flex items-start gap-1.5">
+              <code className="min-w-0 flex-1 break-all rounded-md border border-line bg-white px-2 py-1.5 font-mono text-[9.5px] leading-4 text-ink">
+                {settings.googleRedirectUri}
+              </code>
+              <button
+                type="button"
+                onClick={() => void copyRedirectUri()}
+                title="Copy redirect URI"
+                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-line bg-white text-subtle transition-colors hover:text-ink"
+              >
+                <Copy className="size-3" />
+              </button>
+            </div>
+            <ol className="mt-3 space-y-2">
+              {[
+                "Create an OAuth client (Web application) in Google Cloud Console.",
+                "Paste this exact URI under Authorised redirect URIs.",
+                "Enable the Google Calendar API and add yourself as a test user.",
+                "Save the client ID and secret here, then connect the calendar.",
+              ].map((step, index) => (
+                <li key={step} className="flex gap-2">
+                  <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-brand text-[8px] font-semibold text-white">
+                    {index + 1}
+                  </span>
+                  <span className="text-[9px] leading-4 text-subtle">{step}</span>
+                </li>
+              ))}
+            </ol>
+            <p className="mt-2.5 border-t border-line pt-2 text-[8.5px] leading-3.5 text-subtle">
+              Scopes: <span className="font-mono">openid email profile calendar.events</span>.
+              Events are created with <span className="font-mono">sendUpdates=none</span>,
+              so Google does not email patients.
+            </p>
+          </div>
+        </div>
+      </SectionCard>
 
       <SectionCard
         title="Notification log"

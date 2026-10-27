@@ -23,6 +23,7 @@ export async function GET() {
   const knowledge = getKnowledgeStats();
   const doctors = listDoctors();
   const appointments = listAppointments();
+  const settings = publicSettings();
   const payload: DashboardPayload = {
     stats: {
       ...databaseStats(),
@@ -49,11 +50,13 @@ export async function GET() {
     notifications: listNotifications().slice(0, 50),
     doctors: doctors.map(publicDoctor),
     orders: listOrders(),
-    settings: publicSettings(),
+    settings,
     integrations: {
       groq: Boolean(process.env.GROQ_API_KEY),
-      telegram: publicSettings().telegramConnected,
-      googleCalendar: "event-links-and-ics",
+      telegram: settings.telegramConnected,
+      googleCalendar: settings.googleConnected
+        ? "oauth"
+        : "event-links-and-ics",
       database: "local-json",
     },
   };

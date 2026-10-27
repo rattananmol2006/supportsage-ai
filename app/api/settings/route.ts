@@ -67,6 +67,16 @@ export async function PATCH(request: Request) {
     patch.telegramChatId = text(body.telegramChatId, 120) || undefined;
   }
 
+  if ("googleClientId" in body) {
+    patch.googleClientId = text(body.googleClientId, 300) || undefined;
+  }
+  if ("googleClientSecret" in body) {
+    patch.googleClientSecret = text(body.googleClientSecret, 300) || undefined;
+  }
+  if ("googleCalendarId" in body) {
+    patch.googleCalendarId = text(body.googleCalendarId, 300) || "primary";
+  }
+
   updateSettings(patch);
   const saved = publicSettings();
   const response = NextResponse.json({
@@ -74,6 +84,7 @@ export async function PATCH(request: Request) {
     message:
       "Settings saved. Tokens are only stored on the server and are never returned to the browser.",
     configured: saved.telegramConnected,
+    googleConfigured: saved.googleClientConfigured,
   });
   response.headers.set("Cache-Control", "no-store");
   return response;

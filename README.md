@@ -68,8 +68,9 @@ The dashboard is split into three visible groups so Doctor and Business data nev
 
 **Platform**
 
-11. **Integrations** — Groq and Telegram connection status, clinic settings, Telegram setup, test
-    alert, and the append-only notification log.
+11. **Integrations** — Groq, Telegram, and Google Calendar connection status; clinic settings;
+    Google OAuth setup; Telegram test alert; Google test event; and the append-only notification
+    log.
 
 ## Quick start
 
@@ -106,11 +107,21 @@ GROQ_MODEL=openai/gpt-oss-120b
 # Optional; can also be saved from Dashboard → Integrations
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
+
+# Optional; Google Calendar OAuth (can also be saved in the dashboard)
+GOOGLE_CLIENT_ID=your_google_oauth_client_id
+GOOGLE_CLIENT_SECRET=your_google_oauth_client_secret
+GOOGLE_REDIRECT_URI=http://localhost:3000/api/integrations/google/callback
+APP_URL=http://localhost:3000
 ```
 
 `TELEGRAM_*` values are optional. Without them, appointment and escalation alerts are still logged
 as `queued`; the agent explicitly tells the user that the alert is queued rather than claiming it was
 delivered.
+
+`GOOGLE_*` values are optional. Without them, bookings keep the prefilled Google Calendar link and
+`.ics` download. With them, connect the calendar from **Dashboard → Integrations → Google Calendar
+OAuth** so bookings create real events.
 
 ## Five-minute demo
 
@@ -194,7 +205,8 @@ Key files:
 | `lib/seed.ts` | 20 real Chandigarh ESIC doctors, demo orders, and initial settings |
 | `lib/scheduling.ts` | Working-day, slot, timezone, availability, next-open-slot, and calendar logic |
 | `lib/reminders.ts` | Reminder options, labels, and reminder-time formatting |
-| `lib/calendar.ts` | Google Calendar event URLs and ICS generation with `VALARM` |
+| `lib/calendar.ts` | Prefilled Google Calendar event URLs and ICS generation with `VALARM` |
+| `lib/google-calendar.ts` | Google OAuth, token refresh, and Calendar event create/update/delete |
 | `lib/telegram.ts` | Telegram delivery, status handling, notification log |
 | `lib/insights.ts` | Key-fact extraction, summaries, titles, intent labels |
 | `components/site/chat-widget.tsx` | Persisted chat UI, mode switching, cards, emergency state |
@@ -299,9 +311,13 @@ All endpoints are server-side and return JSON unless noted. List endpoints wrap 
 | `GET` | `/api/escalations` | Escalation list |
 | `PATCH` | `/api/escalations/:id` | Set status to `open`, `acknowledged`, or `resolved` |
 | `GET` | `/api/orders` | Order book exposed to Business mode |
-| `GET` | `/api/settings` | Public settings and Telegram connection state |
-| `PATCH` | `/api/settings` | Save clinic name, phone, timezone, or Telegram credentials |
+| `GET` | `/api/settings` | Public settings and Telegram/Google connection state |
+| `PATCH` | `/api/settings` | Save clinic, Telegram, or Google OAuth settings |
 | `POST` | `/api/settings/test-telegram` | Send a test alert; returns `400` or `502` on failure |
+| `GET` | `/api/integrations/google/start` | Start Google OAuth; redirects to Google consent |
+| `GET` | `/api/integrations/google/callback` | OAuth callback; stores tokens server-side |
+| `POST` | `/api/integrations/google/disconnect` | Revoke the token and clear the connection |
+| `POST` | `/api/integrations/google/test` | Create a 15-minute test event |
 
 ### Chat example
 
@@ -370,9 +386,10 @@ Delivery is logged for every attempt:
 - `queued` — credentials are missing; the full alert is stored locally.
 - `failed` — Telegram rejected the message or was unreachable; the error is stored.
 
-## Google Calendar handoff
+## Google Calendar OAuth
 
-Each appointment stores:
+Google Calendar sync is optional and off by default. Without credentials, every appointment still
+gets:
 
 - A prefilled Google Calendar event URL (`calendarUrl`) with date, time, timezone, patient, reason,
   reference, and clinic address.
@@ -380,17 +397,76 @@ Each appointment stores:
   Calendar, and Outlook. The ICS includes a `VALARM` trigger at the selected reminder lead time.
 - `reminderMinutesBefore` and `reminderAt`, both editable from Appointments.
 
-The Calendar tab provides a Google-Calendar-style availability view without OAuth: 7 past days for
-context, today, and the next 28 days, with per-doctor open vs booked counts, selected-day detail, and
-upcoming reminders. Availability is computed from each doctor's demo working days, slot window, and
-confirmed bookings. Past days show history, not bookable slots.
+### 1. Create the Google OAuth client
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) and create or select a project.
+2. Enable **Google Calendar API** under **APIs & Services → Library**.
+3. Configure **OAuth consent screen** (External is fine for testing). Add your Google account under
+   **Test users** while the app is in testing mode.
+4. Open **APIs & Services → Credentials → Create credentials → OAuth client ID**.
+5. Choose **Web application**.
+6. Add these **Authorised redirect URIs** exactly:
+
+   ```text
+   http://localhost:3000/api/integrations/google/callback
+   http://127.0.0.1:3000/api/integrations/google/callback
+   https://your-deployed-domain.com/api/integrations/google/callback
+   ```
+
+   Add the last one only when you deploy. The localhost and `127.0.0.1` entries are separate
+   strings; Google does not treat them as equivalent.
+
+7. Add **Authorised JavaScript origins** for the site itself (not the callback):
+
+   ```text
+   http://localhost:3000
+   http://127.0.0.1:3000
+   https://your-deployed-domain.com
+   ```
+
+8. Copy the **client ID** and **client secret**.
+
+### 2. Connect the calendar
+
+Either add the values to `.env.local` and restart:
+
+```bash
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=http://localhost:3000/api/integrations/google/callback
+APP_URL=http://localhost:3000
+```
+
+Or paste them into **Dashboard → Integrations → Google Calendar OAuth**, save, and click **Connect
+Google Calendar**. The dashboard shows the exact redirect URI to copy into Google Cloud Console.
+
+The OAuth flow requests `openid`, `email`, `profile`, and
+`https://www.googleapis.com/auth/calendar.events`. That scope can create, update, and delete events
+without granting access to unrelated Google services. Tokens are stored server-side in
+`.data/supportsage.json`; the dashboard only receives connection status and the connected email.
+
+### 3. What syncs
+
+- A confirmed booking creates an event on the configured calendar (`primary` by default) with a popup
+  reminder matching `reminderMinutesBefore`.
+- Changing the reminder patches the Google event.
+- Cancelling the appointment deletes the Google event.
+- Re-confirming a cancelled appointment creates a new event.
+- The dashboard shows **Calendar synced**, **Calendar failed**, or the sync error per appointment.
+- Google receives `sendUpdates=none`, so patients are not emailed by Google.
+- **Test event** creates a 15-minute event tomorrow at 10:00 in the clinic timezone.
+
+If a Google call fails, the booking or dashboard action still succeeds and the error is stored on
+the appointment. The prefilled link and `.ics` download remain available as fallbacks.
+
+The Calendar tab provides a Google-Calendar-style availability view: 7 past days for context, today,
+and the next 28 days, with per-doctor open vs booked counts, selected-day detail, and upcoming
+reminders. Availability is computed from each doctor's demo working days, slot window, and confirmed
+bookings. Past days show history, not bookable slots.
 
 When a requested day or slot is full, `book_appointment` calls `findNextOpenSlot()` and stores the
 requested date/time alongside `autoRebooked: true`. The chat and dashboard both disclose the change,
 and the new booking still gets a reminder.
-
-**Caveat:** full two-way Google Calendar OAuth sync is not implemented because OAuth credentials were
-not provided. The current handoff is link/download based and requires no credentials.
 
 ## Groq notes
 
@@ -426,12 +502,12 @@ This is a demo, not a hardened multi-tenant service. Before real use:
 
 - Add authentication and authorization to `/dashboard` and all write APIs.
 - Move from local JSON to a transactional database with backups and concurrency control.
-- Encrypt Telegram credentials at rest; do not store them in a plain JSON file.
+- Encrypt Telegram and Google OAuth credentials at rest; do not store them in a plain JSON file.
 - Verify the ESIC doctor records against the current ESIC list (the seeded list expired 31-05-2024)
   and replace the fictional order book with real records.
 - Add audit-log immutability, retention rules, and PII redaction.
 - Add per-user rate limiting and abuse protection to `/api/chat`.
-- Implement Google Calendar OAuth if two-way sync is required.
+- Restrict the dashboard's Google OAuth connection to trusted owner accounts.
 - Add monitoring, structured logs, alerting, and error tracking.
 - Add automated tests for triage, retrieval, booking, escalation, and API contracts.
 - Review clinical copy with a licensed clinician and local compliance requirements.
@@ -456,6 +532,14 @@ warnings and still succeed through WASM; those warnings are environmental, not a
 
 - **Chat says it is not configured** — set `GROQ_API_KEY` in `.env.local` and restart the server.
 - **Alerts are queued** — add a bot token and chat id in **Integrations**, then send a test alert.
+- **Google shows `redirect_uri_mismatch`** — copy the URI from **Integrations → Google Calendar
+  OAuth** into the same OAuth client in Google Cloud Console. `localhost` and `127.0.0.1` are
+  different URIs. Changes can take a few minutes to apply.
+- **Google says the app is not verified** — while the consent screen is in testing mode, add your
+  Google account under **Test users**, or publish the app.
+- **Google returns `no_refresh_token`** — remove SupportSage from
+  [Google Account permissions](https://myaccount.google.com/permissions) and connect again. The app
+  requests offline access with `prompt=consent`.
 - **A slot is rejected** — another booking may have taken it, or the time is outside the doctor's
   working hours. Ask Sage for the current slots.
 - **The dashboard looks stale** — use **Refresh**; API responses are `no-store`.

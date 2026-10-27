@@ -350,17 +350,24 @@ function AppointmentCardView({ appointment }: { appointment: Appointment }) {
           Reminder {reminderLabel(appointment.reminderMinutesBefore)} ·{" "}
           {formatReminderAt(appointment.reminderAt, appointment.timezone)}
         </p>
+        {appointment.googleEventLink ? (
+          <p className="text-[9px] text-emerald-800/80">
+            Added to the clinic&apos;s Google Calendar.
+          </p>
+        ) : null}
       </div>
 
       <div className="mt-2 flex flex-wrap gap-1.5">
         <a
-          href={appointment.calendarUrl}
+          href={appointment.googleEventLink ?? appointment.calendarUrl}
           target="_blank"
           rel="noreferrer"
           className="inline-flex items-center gap-1 rounded-md bg-emerald-700 px-2 py-1.5 text-[9.5px] font-medium text-white transition-colors hover:bg-emerald-800"
         >
           <ExternalLink className="size-3" />
-          Add to Google Calendar
+          {appointment.googleEventLink
+            ? "View calendar event"
+            : "Add to Google Calendar"}
         </a>
         <a
           href={appointment.icsUrl}

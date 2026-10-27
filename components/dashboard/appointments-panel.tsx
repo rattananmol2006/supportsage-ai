@@ -20,6 +20,7 @@ import {
   SectionCard,
   appointmentStatusTone,
   formatMonthDay,
+  formatRelative,
   formatShortDate,
   notificationTone,
   phoneHref,
@@ -75,11 +76,19 @@ export function AppointmentsPanel({
       });
       const data = (await response.json().catch(() => null)) as {
         error?: string;
+        googleWarning?: string;
       } | null;
       if (!response.ok) {
         throw new Error(data?.error ?? "Could not update the appointment.");
       }
-      notify("success", `Appointment marked ${status}.`);
+      if (data?.googleWarning) {
+        notify(
+          "error",
+          `Appointment updated, but Google Calendar sync failed: ${data.googleWarning}`,
+        );
+      } else {
+        notify("success", `Appointment marked ${status}.`);
+      }
       await onRefresh();
     } catch (error) {
       notify(
@@ -106,11 +115,22 @@ export function AppointmentsPanel({
       });
       const data = (await response.json().catch(() => null)) as {
         error?: string;
+        googleWarning?: string;
       } | null;
       if (!response.ok) {
         throw new Error(data?.error ?? "Could not update the reminder.");
       }
-      notify("success", `Reminder set ${reminderLabel(reminderMinutesBefore)}.`);
+      if (data?.googleWarning) {
+        notify(
+          "error",
+          `Reminder saved, but Google Calendar sync failed: ${data.googleWarning}`,
+        );
+      } else {
+        notify(
+          "success",
+          `Reminder set ${reminderLabel(reminderMinutesBefore)}.`,
+        );
+      }
       await onRefresh();
     } catch (error) {
       notify(
@@ -195,6 +215,11 @@ export function AppointmentsPanel({
                         >
                           {notificationLabel(appointment.notificationStatus)}
                         </Pill>
+                        {appointment.googleEventLink ? (
+                          <Pill tone="green">Calendar synced</Pill>
+                        ) : appointment.googleSyncError ? (
+                          <Pill tone="red">Calendar failed</Pill>
+                        ) : null}
                       </p>
                       <p className="mt-0.5 text-[10.5px] text-subtle">
                         {appointment.doctorSpecialty} · {appointment.clinic} ·{" "}
@@ -260,15 +285,31 @@ export function AppointmentsPanel({
                     )}
                   </p>
 
+                  {appointment.googleEventLink ? (
+                    <p className="mt-1 text-[9px] text-subtle">
+                      Synced to Google Calendar
+                      {appointment.googleSyncedAt
+                        ? ` ${formatRelative(appointment.googleSyncedAt)}`
+                        : ""}
+                      .
+                    </p>
+                  ) : appointment.googleSyncError ? (
+                    <p className="mt-1 text-[9px] leading-4 text-red-600">
+                      Google Calendar: {appointment.googleSyncError}
+                    </p>
+                  ) : null}
+
                   <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                     <a
-                      href={appointment.calendarUrl}
+                      href={appointment.googleEventLink ?? appointment.calendarUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex items-center gap-1 rounded-md bg-brand px-2 py-1.5 text-[9.5px] font-medium text-white transition-colors hover:bg-brand-deep"
                     >
                       <CalendarPlus className="size-3" />
-                      Google Calendar
+                      {appointment.googleEventLink
+                        ? "Open calendar event"
+                        : "Google Calendar"}
                     </a>
                     <a
                       href={appointment.icsUrl}
