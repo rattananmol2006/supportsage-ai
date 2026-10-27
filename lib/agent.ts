@@ -443,6 +443,18 @@ function resolveDoctor(args: Record<string, unknown>): Doctor | undefined {
   });
 }
 
+function doctorNamedInMessage(doctor: Doctor, message: string) {
+  const name = doctor.name.replace(/^Dr\.?\s*/i, "").trim();
+  const lastName = name.split(/\s+/).at(-1) ?? "";
+  const escape = (value: string) =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [new RegExp(`\\b${escape(name)}\\b`, "i")];
+  if (lastName.length > 3) {
+    patterns.push(new RegExp(`\\bDr\\.?\\s+${escape(lastName)}\\b`, "i"));
+  }
+  return patterns.some((pattern) => pattern.test(message));
+}
+
 function scoreDoctor(
   doctor: Doctor,
   query: string,
@@ -898,9 +910,25 @@ async function escalateCase(
   ];
   const requestedType = stringArg(args, "type") as EscalationType;
   const type = validTypes.includes(requestedType) ? requestedType : "general";
+  const requestedDoctor =
+    state.mode === "doctor" ? resolveDoctor(args) : undefined;
+  const surfacedDoctors =
+    state.mode === "doctor"
+      ? [...state.doctorsById.keys()]
+          .map((id) => findDoctor(id))
+          .filter((doctor): doctor is Doctor => Boolean(doctor))
+      : [];
+  const requestedIsGrounded = Boolean(
+    requestedDoctor &&
+      (surfacedDoctors.some((doctor) => doctor.id === requestedDoctor.id) ||
+        doctorNamedInMessage(requestedDoctor, state.message)),
+  );
   const doctor =
     state.mode === "doctor"
-      ? resolveDoctor(args) ?? pickUrgentDoctor(state)
+      ? (requestedIsGrounded ? requestedDoctor : undefined) ??
+        surfacedDoctors[0] ??
+        requestedDoctor ??
+        pickUrgentDoctor(state)
       : undefined;
   const subject =
     stringArg(args, "subject") ||
