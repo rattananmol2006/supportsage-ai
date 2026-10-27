@@ -1,7 +1,7 @@
 # SupportSage AI — Marketing Site
 
-A responsive, single-page marketing site for **SupportSage AI**, built as a frontend-only
-"hollow shell" that is ready for backend integration.
+A responsive, single-page marketing site for **SupportSage AI**, with a live Groq-powered
+AI chat widget and backend-ready integration points for everything else.
 
 ## Stack
 
@@ -9,6 +9,7 @@ A responsive, single-page marketing site for **SupportSage AI**, built as a fron
 - **Tailwind CSS v4** via the PostCSS plugin
 - **shadcn/ui** components (Radix + Nova preset), with `cn` for class merging
 - **Lucide React** icons
+- **Groq** via a server-side Route Handler
 - **Geist** typography
 - Brand tokens: off-white canvas `#FAFAFA`, charcoal ink `#1A1A1A`, muted gray `#6B7280`,
   maroon accent `#4A1C3A`
@@ -33,10 +34,35 @@ npm run start     # serve the production build
 npm run lint      # ESLint
 ```
 
+## AI chat (Groq)
+
+The floating chat widget is fully functional. It calls `POST /api/chat`, which keeps the
+Groq key on the server and applies a mode-specific system prompt.
+
+Create `.env.local` in the project root:
+
+```bash
+GROQ_API_KEY=your_groq_api_key
+GROQ_MODEL=openai/gpt-oss-120b
+```
+
+The route defaults to `openai/gpt-oss-120b` if `GROQ_MODEL` is omitted. For production,
+add both variables in your hosting provider's environment settings. Never prefix the key
+with `NEXT_PUBLIC_`, and never commit `.env.local`. Add authentication or rate limiting
+before exposing the chat endpoint publicly.
+
+The widget includes:
+
+- **Doctor** and **Business Owner** modes with separate conversation histories
+- Mode-specific greetings, suggested prompts, and response behavior
+- Loading, empty, error, reset, and mobile states
+- Keyboard-accessible mode toggles and composer
+
 ## Project structure
 
 ```
 app/
+  api/chat/route.ts       Server-side Groq proxy and mode prompts
   layout.tsx              Root layout, Geist fonts, metadata
   page.tsx                Single-page composition
   globals.css             Design tokens, shadcn theme, motion, mobile card guardrail
@@ -45,11 +71,12 @@ components/
   site/                   Navbar, Hero, Capabilities, Pipeline, Metrics,
                           Technology, FinalCta, Footer, ChatWidget
   ui/
-    3d-tilt-card.tsx      Supplied 3D tilt card (used in Hero + Pipeline)
+    3d-tilt-card.tsx      Supplied 3D tilt card (used in Hero)
     button.tsx, card.tsx, ... (shadcn/ui)
 lib/
+  chat-modes.ts           Chat mode labels, greetings, icons, suggestions
   data.ts                 All capabilities, pipeline, metric, tech, and nav content
-  mock-api.ts             handleAction() placeholder for every API-backed control
+  mock-api.ts             handleAction() placeholder for CTA controls
   utils.ts                shadcn class helper
 ```
 
@@ -77,15 +104,15 @@ npm install lucide-react
 
 ## Backend integration points
 
-Everything is intentionally hollow:
+The chat is live; the remaining marketing controls stay intentionally hollow:
 
 - `lib/mock-api.ts` — `handleAction(action)` logs
   `"API call pending backend integration"` and is wired to every CTA.
 - `lib/data.ts` — replace the arrays to make capabilities, pipeline steps, metrics, and
   stack content API-driven.
-- `components/site/chat-widget.tsx` — floating launcher, disabled composer, and the
-  "SupportSage AI Backend connection pending." state. Connect the form submit handler
-  to your streaming chat API when ready.
+- `app/api/chat/route.ts` — server-side Groq proxy; add streaming, persistence, or human
+  handoff here when the production backend is ready.
+- `lib/chat-modes.ts` — edit the mode copy, greetings, and suggested prompts.
 - `components/site/final-cta.tsx` / `components/site/navbar.tsx` — hook the "Book a Demo"
   handlers to your scheduling backend.
 - `components/ui/3d-tilt-card.tsx` — supplied verbatim by the brief, including its
